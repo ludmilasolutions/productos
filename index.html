@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buscador de Productos - Ferretería</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Encabezado -->
+        <header class="app-header">
+            <div class="header-content">
+                <h1><i class="fas fa-tools"></i> Ferretería Comisión</h1>
+                <p class="subtitle">Busca productos y consulta por WhatsApp</p>
+            </div>
+            <div class="header-actions">
+                <button id="infoBtn" class="icon-btn" aria-label="Información">
+                    <i class="fas fa-info-circle"></i>
+                </button>
+            </div>
+        </header>
+        
+        <!-- Panel de búsqueda -->
+        <div class="search-panel">
+            <div class="search-box">
+                <i class="fas fa-search search-icon"></i>
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    placeholder="Buscar por código, descripción o marca..." 
+                    autocomplete="off"
+                >
+                <button id="clearSearch" class="clear-btn" aria-label="Limpiar búsqueda">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="rubroFilter"><i class="fas fa-filter"></i> Filtrar por rubro:</label>
+                    <select id="rubroFilter">
+                        <option value="">Todos los rubros</option>
+                        <!-- Las opciones se cargarán dinámicamente -->
+                    </select>
+                </div>
+                
+                <div class="results-info">
+                    <span id="resultsCount">0 productos</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Lista de productos -->
+        <main class="products-container">
+            <div id="productsList" class="products-list">
+                <!-- Los productos aparecerán aquí -->
+                <div class="empty-state">
+                    <i class="fas fa-box-open"></i>
+                    <p>Cargando productos...</p>
+                </div>
+            </div>
+            
+            <div id="noResults" class="empty-state hidden">
+                <i class="fas fa-search"></i>
+                <p>No se encontraron productos</p>
+                <p class="small">Intenta con otros términos de búsqueda</p>
+            </div>
+        </main>
+        
+        <!-- Botón flotante de WhatsApp -->
+        <a id="whatsappBtn" class="whatsapp-btn hidden" target="_blank" aria-label="Consultar por WhatsApp">
+            <i class="fab fa-whatsapp"></i>
+            <span>Consultar</span>
+        </a>
+        
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>Sistema de venta a comisión - 100% Frontend</p>
+            <p class="footer-note">Los precios pueden cambiar semanalmente</p>
+        </footer>
+        
+        <!-- Modal de información -->
+        <div id="infoModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2><i class="fas fa-info-circle"></i> Cómo usar el sistema</h2>
+                    <button id="closeModal" class="close-btn" aria-label="Cerrar">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="instruction">
+                        <h3><i class="fas fa-search"></i> Buscar productos</h3>
+                        <p>Escribe en el buscador para encontrar productos por código, descripción o marca.</p>
+                    </div>
+                    
+                    <div class="instruction">
+                        <h3><i class="fas fa-filter"></i> Filtrar por rubro</h3>
+                        <p>Usa el selector de rubros para mostrar solo productos de una categoría específica.</p>
+                    </div>
+                    
+                    <div class="instruction">
+                        <h3><i class="fab fa-whatsapp"></i> Consultar por WhatsApp</h3>
+                        <p>Haz clic en "Consultar por WhatsApp" en cualquier producto para enviar un mensaje predefinido con los detalles.</p>
+                    </div>
+                    
+                    <div class="instruction">
+                        <h3><i class="fas fa-sync-alt"></i> Actualización de precios</h3>
+                        <p>Los precios se actualizan 1-2 veces por semana. Asegúrate de tener la versión más reciente del archivo de productos.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
