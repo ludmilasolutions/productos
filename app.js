@@ -1,86 +1,85 @@
-// Aplicación de búsqueda de productos para ferretería
-document.addEventListener('DOMContentLoaded', function() {
-    // Elementos del DOM
-    const searchInput = document.getElementById('searchInput');
-    const clearSearch = document.getElementById('clearSearch');
-    const rubroFilter = document.getElementById('rubroFilter');
-    const productsList = document.getElementById('productsList');
-    const noResults = document.getElementById('noResults');
-    const resultsCount = document.getElementById('resultsCount');
-    const whatsappBtn = document.getElementById('whatsappBtn');
-    const infoBtn = document.getElementById('infoBtn');
-    const infoModal = document.getElementById('infoModal');
-    const closeModal = document.getElementById('closeModal');
-    
-    // Variables de estado
-    let allProducts = [];
-    let filteredProducts = [];
-    let rubros = new Set();
-    
-    // Inicializar la aplicación
-    initApp();
-    
-    async function initApp() {
-        // Cargar productos desde el archivo JSON
-        await loadProducts();
+// Sistema de búsqueda para Ferretería Carnevale
+class ProductSearchSystem {
+    constructor() {
+        this.products = [];
+        this.filteredProducts = [];
+        this.rubros = new Set();
+        this.currentSearch = '';
+        this.currentRubro = '';
+        this.currentSort = 'descripcion';
         
-        // Configurar eventos
-        setupEventListeners();
-        
-        // Mostrar todos los productos inicialmente
-        filterProducts();
+        // Inicializar
+        this.init();
     }
     
-    // Cargar productos desde el archivo JSON
-    async function loadProducts() {
+    async init() {
+        // Cargar productos
+        await this.loadProducts();
+        
+        // Inicializar controles
+        this.initControls();
+        
+        // Renderizar productos iniciales
+        this.renderProducts();
+        
+        // Actualizar fecha
+        this.updateDates();
+    }
+    
+    async loadProducts() {
         try {
-            showLoadingState();
+            // Mostrar spinner de carga
+            document.getElementById('productCount').textContent = 'Cargando productos...';
             
-            // Cargar el archivo products.json
+            // Cargar el archivo JSON
             const response = await fetch('products.json');
             
             if (!response.ok) {
                 throw new Error(`Error al cargar productos: ${response.status}`);
             }
             
-            allProducts = await response.json();
+            this.products = await response.json();
             
             // Extraer rubros únicos
-            extractRubros();
+            this.extractRubros();
             
-            // Llenar el selector de rubros
-            populateRubroFilter();
+            // Productos iniciales son todos los productos
+            this.filteredProducts = [...this.products];
             
-            console.log(`${allProducts.length} productos cargados correctamente`);
+            // Actualizar contador
+            this.updateProductCount();
             
         } catch (error) {
             console.error('Error cargando productos:', error);
-            showErrorState('Error al cargar los productos. Asegúrate de que el archivo products.json esté disponible.');
+            document.getElementById('productCount').textContent = 'Error cargando productos';
+            document.getElementById('productsContainer').innerHTML = `
+                <div class="no-results" style="display: block;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Error al cargar los productos</h3>
+                    <p>Por favor, verifica que el archivo products.json esté en la carpeta correcta</p>
+                </div>
+            `;
         }
     }
     
-    // Extraer rubros únicos de los productos
-    function extractRubros() {
-        rubros.clear();
-        allProducts.forEach(product => {
-            if (product.rubro && product.rubro.trim()) {
-                rubros.add(product.rubro);
+    extractRubros() {
+        this.rubros.clear();
+        
+        // Agregar rubros únicos
+        this.products.forEach(product => {
+            if (product.rubro && product.rubro.trim() !== '') {
+                this.rubros.add(product.rubro.trim());
             }
         });
         
-        // Convertir a array y ordenar alfabéticamente
-        rubros = new Set([...rubros].sort());
-    }
-    
-    // Llenar el selector de rubros
-    function populateRubroFilter() {
-        // Limpiar opciones existentes (excepto la primera)
-        while (rubroFilter.options.length > 1) {
-            rubroFilter.remove(1);
-        }
+        // Ordenar rubros alfabéticamente
+        const rubrosArray = Array.from(this.rubros).sort();
         
-        // Agregar cada rubro como opción
-        rubros.forEach(rubro => {
+        // Actualizar selector de rubros
+        const rubroFilter = document.getElementById('rubroFilter');
+        rubroFilter.innerHTML = '<option value="">Todos los rubros</option>';
+        
+        rubrosArray.forEach(rubro => {
             const option = document.createElement('option');
             option.value = rubro;
             option.textContent = rubro;
@@ -88,305 +87,314 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Configurar event listeners
-    function setupEventListeners() {
-        // Búsqueda en tiempo real
-        searchInput.addEventListener('input', filterProducts);
+    initControls() {
+        // Buscador
+        const searchInput = document.getElementById('searchInput');
+        const clearSearch = document.getElementById('clearSearch');
+        const rubroFilter = document.getElementById('rubroFilter');
+        const sortFilter = document.getElementById('sortFilter');
+        const scrollTopBtn = document.getElementById('scrollTopBtn');
+        const closeModal = document.getElementById('closeModal');
+        const modal = document.getElementById('productModal');
+        
+        // Evento de búsqueda
+        searchInput.addEventListener('input', (e) => {
+            this.currentSearch = e.target.value.toLowerCase().trim();
+            this.filterProducts();
+            this.renderProducts();
+        });
         
         // Limpiar búsqueda
         clearSearch.addEventListener('click', () => {
             searchInput.value = '';
+            this.currentSearch = '';
+            this.filterProducts();
+            this.renderProducts();
             searchInput.focus();
-            filterProducts();
         });
         
-        // Filtrar por rubro
-        rubroFilter.addEventListener('change', filterProducts);
-        
-        // Modal de información
-        infoBtn.addEventListener('click', () => {
-            infoModal.classList.add('active');
+        // Filtro por rubro
+        rubroFilter.addEventListener('change', (e) => {
+            this.currentRubro = e.target.value;
+            this.filterProducts();
+            this.renderProducts();
         });
         
+        // Ordenar productos
+        sortFilter.addEventListener('change', (e) => {
+            this.currentSort = e.target.value;
+            this.sortProducts();
+            this.renderProducts();
+        });
+        
+        // Botón para subir
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 300) {
+                scrollTopBtn.classList.add('visible');
+            } else {
+                scrollTopBtn.classList.remove('visible');
+            }
+        });
+        
+        scrollTopBtn.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        
+        // Cerrar modal
         closeModal.addEventListener('click', () => {
-            infoModal.classList.remove('active');
+            modal.classList.remove('active');
         });
         
         // Cerrar modal al hacer clic fuera
-        infoModal.addEventListener('click', (e) => {
-            if (e.target === infoModal) {
-                infoModal.classList.remove('active');
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('active');
             }
         });
         
-        // Cerrar modal con tecla Escape
+        // Cerrar modal con ESC
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && infoModal.classList.contains('active')) {
-                infoModal.classList.remove('active');
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
             }
         });
     }
     
-    // Filtrar productos según búsqueda y filtros
-    function filterProducts() {
-        const searchTerm = searchInput.value.toLowerCase().trim();
-        const selectedRubro = rubroFilter.value;
+    filterProducts() {
+        // Filtrar por búsqueda
+        let filtered = this.products;
         
-        // Filtrar productos
-        filteredProducts = allProducts.filter(product => {
-            // Filtrar por rubro si se seleccionó uno
-            if (selectedRubro && product.rubro !== selectedRubro) {
-                return false;
-            }
-            
-            // Si no hay término de búsqueda, mostrar todos los productos del rubro seleccionado
-            if (!searchTerm) {
-                return true;
-            }
-            
-            // Buscar en código, descripción y marca
-            const inCodigo = product.codigo.toLowerCase().includes(searchTerm);
-            const inDescripcion = product.descripcion.toLowerCase().includes(searchTerm);
-            const inMarca = product.marca.toLowerCase().includes(searchTerm);
-            
-            return inCodigo || inDescripcion || inMarca;
-        });
-        
-        // Actualizar contador de resultados
-        updateResultsCount();
-        
-        // Mostrar productos o mensaje de no resultados
-        if (filteredProducts.length === 0) {
-            showNoResults();
-        } else {
-            renderProducts();
+        if (this.currentSearch) {
+            filtered = filtered.filter(product => {
+                const searchLower = this.currentSearch.toLowerCase();
+                return (
+                    (product.descripcion && product.descripcion.toLowerCase().includes(searchLower)) ||
+                    (product.codigo && product.codigo.toLowerCase().includes(searchLower)) ||
+                    (product.marca && product.marca.toLowerCase().includes(searchLower))
+                );
+            });
         }
         
-        // Ocultar botón de WhatsApp global
-        whatsappBtn.classList.add('hidden');
-    }
-    
-    // Actualizar contador de resultados
-    function updateResultsCount() {
-        const total = allProducts.length;
-        const filtered = filteredProducts.length;
-        
-        if (filtered === total) {
-            resultsCount.textContent = `${total} productos`;
-        } else {
-            resultsCount.textContent = `${filtered} de ${total} productos`;
+        // Filtrar por rubro
+        if (this.currentRubro) {
+            filtered = filtered.filter(product => 
+                product.rubro && product.rubro === this.currentRubro
+            );
         }
+        
+        this.filteredProducts = filtered;
+        this.sortProducts();
+        this.updateProductCount();
     }
     
-    // Mostrar estado de carga
-    function showLoadingState() {
-        productsList.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-spinner fa-spin"></i>
-                <p>Cargando productos...</p>
-            </div>
-        `;
-        noResults.classList.add('hidden');
-    }
-    
-    // Mostrar estado de error
-    function showErrorState(message) {
-        productsList.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p>${message}</p>
-                <button id="retryBtn" class="whatsapp-product-btn" style="margin-top: 20px;">
-                    <i class="fas fa-redo"></i> Reintentar
-                </button>
-            </div>
-        `;
-        
-        // Agregar event listener al botón de reintentar
-        document.getElementById('retryBtn').addEventListener('click', initApp);
-        
-        noResults.classList.add('hidden');
-    }
-    
-    // Mostrar mensaje de no resultados
-    function showNoResults() {
-        productsList.innerHTML = '';
-        noResults.classList.remove('hidden');
-    }
-    
-    // Renderizar productos en la lista
-    function renderProducts() {
-        noResults.classList.add('hidden');
-        
-        // Limpiar lista
-        productsList.innerHTML = '';
-        
-        // Crear y agregar tarjetas de producto
-        filteredProducts.forEach(product => {
-            const productCard = createProductCard(product);
-            productsList.appendChild(productCard);
-        });
-    }
-    
-    // Crear tarjeta de producto
-    function createProductCard(product) {
-        const card = document.createElement('div');
-        card.className = 'product-card';
-        
-        // Formatear precio
-        const formattedPrice = new Intl.NumberFormat('es-AR', {
-            style: 'currency',
-            currency: 'ARS',
-            minimumFractionDigits: 2
-        }).format(product.precio_venta);
-        
-        // Crear contenido de la tarjeta
-        card.innerHTML = `
-            <div class="product-header">
-                <div class="product-code">Código: ${product.codigo}</div>
-                <div class="product-rubro">${product.rubro || 'SIN RUBRO'}</div>
-            </div>
-            
-            <div class="product-body">
-                <h3 class="product-description">${product.descripcion}</h3>
+    sortProducts() {
+        switch (this.currentSort) {
+            case 'descripcion':
+                this.filteredProducts.sort((a, b) => 
+                    (a.descripcion || '').localeCompare(b.descripcion || '')
+                );
+                break;
                 
-                ${product.marca ? `
-                    <div class="product-marca">
-                        <i class="fas fa-tag"></i>
-                        <span>${product.marca}</span>
-                    </div>
-                ` : ''}
-            </div>
-            
-            <div class="product-footer">
-                <div class="product-price">${formattedPrice}</div>
-                <button class="whatsapp-product-btn" data-product='${JSON.stringify(product)}'>
-                    <i class="fab fa-whatsapp"></i>
-                    Consultar por WhatsApp
-                </button>
-            </div>
-        `;
-        
-        // Agregar evento al botón de WhatsApp
-        const whatsappButton = card.querySelector('.whatsapp-product-btn');
-        whatsappButton.addEventListener('click', () => {
-            openWhatsApp(product);
-        });
-        
-        return card;
+            case 'precio_asc':
+                this.filteredProducts.sort((a, b) => 
+                    (a.precio_venta || 0) - (b.precio_venta || 0)
+                );
+                break;
+                
+            case 'precio_desc':
+                this.filteredProducts.sort((a, b) => 
+                    (b.precio_venta || 0) - (a.precio_venta || 0)
+                );
+                break;
+                
+            case 'codigo':
+                this.filteredProducts.sort((a, b) => 
+                    (a.codigo || '').localeCompare(b.codigo || '')
+                );
+                break;
+        }
     }
     
-    // Abrir WhatsApp con mensaje predefinido
-    function openWhatsApp(product) {
-        // Crear mensaje para WhatsApp
+    updateProductCount() {
+        const count = this.filteredProducts.length;
+        const total = this.products.length;
+        const countElement = document.getElementById('productCount');
+        
+        countElement.innerHTML = `
+            <span class="count">${count}</span> productos
+            ${this.currentSearch || this.currentRubro ? 
+                `<span class="filter-info"> (filtrados de ${total})</span>` : 
+                ''
+            }
+        `;
+        
+        // Mostrar/ocultar mensaje sin resultados
+        const noResults = document.getElementById('noResults');
+        const productsContainer = document.getElementById('productsContainer');
+        
+        if (count === 0 && this.products.length > 0) {
+            noResults.style.display = 'block';
+            productsContainer.style.display = 'none';
+        } else {
+            noResults.style.display = 'none';
+            productsContainer.style.display = 'grid';
+        }
+    }
+    
+    renderProducts() {
+        const container = document.getElementById('productsContainer');
+        
+        if (this.filteredProducts.length === 0 && this.products.length > 0) {
+            container.innerHTML = '';
+            return;
+        }
+        
+        if (this.filteredProducts.length === 0) {
+            // Mostrar spinner mientras carga
+            container.innerHTML = `
+                <div class="loading-spinner">
+                    <div class="spinner"></div>
+                    <p>Cargando listado de precios...</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Generar HTML de productos
+        const productsHTML = this.filteredProducts.map(product => this.createProductCard(product)).join('');
+        container.innerHTML = productsHTML;
+        
+        // Agregar event listeners a las tarjetas
+        this.addProductCardListeners();
+    }
+    
+    createProductCard(product) {
+        const precioFormateado = this.formatPrice(product.precio_venta);
+        
+        return `
+            <div class="product-card" data-id="${product.codigo}">
+                <div class="product-header">
+                    <div class="product-code">
+                        <i class="fas fa-barcode"></i> ${product.codigo}
+                    </div>
+                    <div class="product-desc" title="${product.descripcion}">
+                        ${product.descripcion}
+                    </div>
+                    ${product.marca ? `
+                        <div class="product-brand">
+                            <i class="fas fa-tag"></i> ${product.marca}
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="product-body">
+                    ${product.rubro ? `
+                        <div class="product-rubro">
+                            <i class="fas fa-folder"></i> ${product.rubro}
+                        </div>
+                    ` : ''}
+                    <div class="product-price">${precioFormateado}</div>
+                    <button class="whatsapp-btn" onclick="productSystem.openWhatsApp(event, ${JSON.stringify(product).replace(/"/g, '&quot;')})">
+                        <i class="fab fa-whatsapp"></i> Consultar por WhatsApp
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    addProductCardListeners() {
+        const productCards = document.querySelectorAll('.product-card');
+        
+        productCards.forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Evitar abrir modal si se hizo clic en el botón de WhatsApp
+                if (e.target.closest('.whatsapp-btn')) {
+                    return;
+                }
+                
+                const codigo = card.getAttribute('data-id');
+                const product = this.filteredProducts.find(p => p.codigo === codigo);
+                
+                if (product) {
+                    this.openProductModal(product);
+                }
+            });
+        });
+    }
+    
+    openProductModal(product) {
+        const modal = document.getElementById('productModal');
+        const precioFormateado = this.formatPrice(product.precio_venta);
+        
+        // Actualizar contenido del modal
+        document.getElementById('modalCodigo').textContent = product.codigo;
+        document.getElementById('modalDescripcion').textContent = product.descripcion;
+        document.getElementById('modalMarca').textContent = product.marca || 'No especificada';
+        document.getElementById('modalRubro').textContent = product.rubro || 'No especificado';
+        document.getElementById('modalPrecio').textContent = precioFormateado;
+        
+        // Actualizar botón de WhatsApp en el modal
+        const modalWhatsAppBtn = document.getElementById('modalWhatsAppBtn');
+        modalWhatsAppBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.openWhatsApp(e, product);
+            modal.classList.remove('active');
+        };
+        
+        // Mostrar modal
+        modal.classList.add('active');
+    }
+    
+    openWhatsApp(event, product) {
+        event.stopPropagation();
+        
         const message = `Hola, quiero consultar por:
 ${product.descripcion}
 Código: ${product.codigo}
-Precio: $${product.precio_venta.toFixed(2)}`;
+Precio: $${this.formatPrice(product.precio_venta)}`;
         
-        // Codificar el mensaje para URL
         const encodedMessage = encodeURIComponent(message);
-        
-        // Crear enlace de WhatsApp
         const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
         
-        // Abrir en nueva pestaña
+        // Abrir WhatsApp en nueva pestaña
         window.open(whatsappUrl, '_blank');
     }
     
-    // Función para generar un archivo de ejemplo (products.json) si no existe
-    function generateExampleData() {
-        const exampleData = [
-            {
-                "codigo": "29921",
-                "rubro": "ABRAZADERAS",
-                "descripcion": "ABRAZADERA 12 A 20",
-                "marca": "FERRETERA",
-                "precio_venta": 847
-            },
-            {
-                "codigo": "29922",
-                "rubro": "ABRAZADERAS",
-                "descripcion": "ABRAZADERA 20 A 30",
-                "marca": "FERRETERA",
-                "precio_venta": 1050
-            },
-            {
-                "codigo": "30567",
-                "rubro": "TORNILLOS",
-                "descripcion": "TORNILLO 3X25 C/SELLO",
-                "marca": "ACERO PLUS",
-                "precio_venta": 45
-            },
-            {
-                "codigo": "30568",
-                "rubro": "TORNILLOS",
-                "descripcion": "TORNILLO 4X40 C/SELLO",
-                "marca": "ACERO PLUS",
-                "precio_venta": 62
-            },
-            {
-                "codigo": "41234",
-                "rubro": "HERRAMIENTAS",
-                "descripcion": "MARTILLO DE OREJAS 500G",
-                "marca": "PROFESIONAL",
-                "precio_venta": 2850
-            },
-            {
-                "codigo": "41235",
-                "rubro": "HERRAMIENTAS",
-                "descripcion": "ALICATE UNIVERSAL 8\"",
-                "marca": "PROFESIONAL",
-                "precio_venta": 3200
-            },
-            {
-                "codigo": "52341",
-                "rubro": "PINTURAS",
-                "descripcion": "PINTURA BLANCO 1L",
-                "marca": "COLOREX",
-                "precio_venta": 5890
-            },
-            {
-                "codigo": "52342",
-                "rubro": "PINTURAS",
-                "descripcion": "PINTURA NEGRO 1L",
-                "marca": "COLOREX",
-                "precio_venta": 5890
-            },
-            {
-                "codigo": "63456",
-                "rubro": "ELECTRICIDAD",
-                "descripcion": "CABLE DUPLAR 2.5MM 50M",
-                "marca": "CABLEMAX",
-                "precio_venta": 12500
-            },
-            {
-                "codigo": "63457",
-                "rubro": "ELECTRICIDAD",
-                "descripcion": "INTERRUPTOR SIMPLE",
-                "marca": "LUMINEX",
-                "precio_venta": 450
-            }
-        ];
+    formatPrice(price) {
+        if (typeof price !== 'number') {
+            price = parseFloat(price) || 0;
+        }
         
-        return exampleData;
+        // Formato argentino con separador de miles
+        return price.toLocaleString('es-AR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        });
     }
     
-    // Si no hay archivo products.json, podemos generar datos de ejemplo
-    // Nota: En producción, esto debería venir del archivo JSON real
-    window.generateExampleJSON = function() {
-        const exampleData = generateExampleData();
-        const jsonString = JSON.stringify(exampleData, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
+    updateDates() {
+        const today = new Date();
+        const options = { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        };
         
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'products_example.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        const dateString = today.toLocaleDateString('es-AR', options);
+        const timeString = today.toLocaleTimeString('es-AR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
         
-        alert('Archivo de ejemplo descargado. Renómbralo a "products.json" y súbelo a Netlify.');
-    };
+        // Actualizar fecha en el header
+        document.getElementById('updateDate').textContent = `Actualizado: ${dateString}`;
+        
+        // Actualizar fecha en el footer
+        document.getElementById('footerDate').textContent = `${dateString} ${timeString}`;
+    }
+}
+
+// Inicializar el sistema cuando el DOM esté listo
+document.addEventListener('DOMContentLoaded', () => {
+    window.productSystem = new ProductSearchSystem();
 });
