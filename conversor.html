@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor Excel → JSON - Ferretería</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .container {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            padding: 30px;
+            margin-top: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 28px;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: #34495e;
+            margin: 25px 0 15px;
+            font-size: 22px;
+        }
+        
+        .step {
+            background-color: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .file-input-container {
+            margin: 25px 0;
+            text-align: center;
+            padding: 30px;
+            border: 2px dashed #3498db;
+            border-radius: 10px;
+            background-color: #f8fafc;
+            transition: all 0.3s;
+        }
+        
+        .file-input-container:hover {
+            background-color: #e8f4fc;
+            border-color: #2980b9;
+        }
+        
+        .file-input-label {
+            display: block;
+            font-size: 18px;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        
+        #fileInput {
+            display: block;
+            margin: 0 auto 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+            margin: 10px 5px;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        #convertBtn {
+            background-color: #27ae60;
+        }
+        
+        #convertBtn:hover:not(:disabled) {
+            background-color: #219653;
+        }
+        
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        .results.active {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        #productCount {
+            font-weight: bold;
+            color: #27ae60;
+        }
+        
+        #downloadBtn {
+            background-color: #e74c3c;
+        }
+        
+        #downloadBtn:hover {
+            background-color: #c0392b;
+        }
+        
+        .instructions {
+            background-color: #fff8e1;
+            border-left: 4px solid #f39c12;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .instructions ul {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        
+        .instructions li {
+            margin-bottom: 8px;
+        }
+        
+        .data-preview {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 20px 0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            background-color: #fcfcfc;
+        }
+        
+        .data-preview table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .data-preview th {
+            background-color: #2c3e50;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+        }
+        
+        .data-preview td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .data-preview tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        footer {
+            margin-top: 40px;
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 14px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 15px;
+            }
+            
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .file-input-container {
+                padding: 20px;
+            }
+            
+            button {
+                width: 100%;
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Conversor Excel → JSON para Ferretería</h1>
+        <p>Convierte tu archivo Excel de productos en un archivo JSON optimizado para el buscador.</p>
+        
+        <div class="instructions">
+            <h2>Instrucciones:</h2>
+            <ul>
+                <li>El archivo Excel debe contener al menos estas columnas: <strong>Codigo, Rubro, Descripcion, Marca, PrecioVenta</strong></li>
+                <li>Las columnas pueden estar en cualquier orden (se identifican por nombre)</li>
+                <li>Los productos con PrecioVenta = 0 o vacío serán ignorados</li>
+                <li>Se descargará automáticamente un archivo <code>products.json</code></li>
+            </ul>
+        </div>
+        
+        <div class="step">
+            <h2>Paso 1: Seleccionar archivo Excel (.xlsx)</h2>
+            <div class="file-input-container">
+                <label for="fileInput" class="file-input-label">Selecciona tu archivo de productos</label>
+                <input type="file" id="fileInput" accept=".xlsx, .xls">
+                <p>Formato admitido: .xlsx o .xls</p>
+            </div>
+        </div>
+        
+        <div class="step">
+            <h2>Paso 2: Convertir a JSON</h2>
+            <div style="text-align: center;">
+                <button id="convertBtn" disabled>Convertir Excel a JSON</button>
+            </div>
+        </div>
+        
+        <div class="step">
+            <h2>Paso 3: Vista previa y descarga</h2>
+            <div class="results" id="resultsSection">
+                <p>Se encontraron <span id="productCount">0</span> productos válidos.</p>
+                
+                <div id="dataPreview" class="data-preview">
+                    <!-- Vista previa de datos aparecerá aquí -->
+                </div>
+                
+                <div style="text-align: center;">
+                    <button id="downloadBtn">Descargar products.json</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="step">
+            <h2>Próximo paso:</h2>
+            <p>Una vez descargado el archivo <code>products.json</code>, súbelo a Netlify junto con los otros archivos del sistema:</p>
+            <ul>
+                <li><code>index.html</code> - Buscador principal</li>
+                <li><code>styles.css</code> - Estilos</li>
+                <li><code>app.js</code> - Lógica de búsqueda</li>
+                <li><code>products.json</code> - Archivo generado</li>
+            </ul>
+        </div>
+    </div>
+    
+    <footer>
+        <p>Sistema de venta a comisión para ferretería - 100% Frontend</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('fileInput');
+            const convertBtn = document.getElementById('convertBtn');
+            const resultsSection = document.getElementById('resultsSection');
+            const productCount = document.getElementById('productCount');
+            const dataPreview = document.getElementById('dataPreview');
+            const downloadBtn = document.getElementById('downloadBtn');
+            
+            let productsData = [];
+            
+            // Habilitar botón cuando se selecciona un archivo
+            fileInput.addEventListener('change', function() {
+                convertBtn.disabled = !fileInput.files.length;
+            });
+            
+            // Convertir Excel a JSON
+            convertBtn.addEventListener('click', function() {
+                if (!fileInput.files.length) return;
+                
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        
+                        // Obtener la primera hoja
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        
+                        // Convertir a JSON
+                        const rawData = XLSX.utils.sheet_to_json(worksheet);
+                        
+                        // Procesar datos
+                        productsData = processExcelData(rawData);
+                        
+                        // Mostrar resultados
+                        productCount.textContent = productsData.length;
+                        showDataPreview(productsData.slice(0, 10)); // Mostrar primeros 10
+                        resultsSection.classList.add('active');
+                        
+                        // Habilitar botón de descarga
+                        downloadBtn.disabled = false;
+                        
+                        // Desplazarse a los resultados
+                        resultsSection.scrollIntoView({ behavior: 'smooth' });
+                        
+                    } catch (error) {
+                        alert('Error al procesar el archivo: ' + error.message);
+                        console.error(error);
+                    }
+                };
+                
+                reader.readAsArrayBuffer(file);
+            });
+            
+            // Descargar JSON
+            downloadBtn.addEventListener('click', function() {
+                if (!productsData.length) return;
+                
+                // Crear JSON
+                const jsonString = JSON.stringify(productsData, null, 2);
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                // Crear enlace de descarga
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'products.json';
+                document.body.appendChild(a);
+                a.click();
+                
+                // Limpiar
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+                
+                // Mostrar mensaje de éxito
+                alert(`Archivo products.json descargado con ${productsData.length} productos.`);
+            });
+            
+            // Procesar datos del Excel
+            function processExcelData(rawData) {
+                const processedData = [];
+                
+                rawData.forEach(row => {
+                    try {
+                        // Buscar las columnas por nombre (case insensitive)
+                        const columns = findColumns(row);
+                        
+                        if (!columns.codigo || !columns.descripcion || !columns.precio_venta) {
+                            return; // Saltar filas sin datos esenciales
+                        }
+                        
+                        // Obtener precio y verificar que sea válido
+                        let precio = parseFloat(columns.precio_venta);
+                        if (isNaN(precio) || precio <= 0) {
+                            return; // Saltar productos con precio inválido
+                        }
+                        
+                        // Crear objeto de producto
+                        const producto = {
+                            codigo: String(columns.codigo).trim(),
+                            rubro: columns.rubro ? String(columns.rubro).trim().toUpperCase() : '',
+                            descripcion: String(columns.descripcion).trim(),
+                            marca: columns.marca ? String(columns.marca).trim() : '',
+                            precio_venta: parseFloat(precio.toFixed(2))
+                        };
+                        
+                        processedData.push(producto);
+                        
+                    } catch (error) {
+                        console.warn('Error procesando fila:', row, error);
+                    }
+                });
+                
+                return processedData;
+            }
+            
+            // Buscar columnas por nombre (case insensitive y sin espacios extra)
+            function findColumns(row) {
+                const columnMap = {};
+                const rowKeys = Object.keys(row);
+                
+                // Buscar cada columna necesaria
+                const targetColumns = [
+                    { key: 'codigo', aliases: ['codigo', 'código', 'cod', 'code'] },
+                    { key: 'rubro', aliases: ['rubro', 'categoria', 'categoría', 'category'] },
+                    { key: 'descripcion', aliases: ['descripcion', 'descripción', 'desc', 'producto', 'product'] },
+                    { key: 'marca', aliases: ['marca', 'brand'] },
+                    { key: 'precio_venta', aliases: ['precioventa', 'precio_venta', 'precio', 'price'] }
+                ];
+                
+                targetColumns.forEach(target => {
+                    let found = false;
+                    
+                    // Buscar coincidencia exacta o parcial
+                    for (const rowKey of rowKeys) {
+                        const normalizedRowKey = String(rowKey).toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+                        
+                        for (const alias of target.aliases) {
+                            if (normalizedRowKey === alias.toLowerCase()) {
+                                columnMap[target.key] = row[rowKey];
+                                found = true;
+                                break;
+                            }
+                        }
+                        
+                        if (found) break;
+                    }
+                    
+                    // Si no se encontró, asignar valor vacío
+                    if (!found) {
+                        columnMap[target.key] = '';
+                    }
+                });
+                
+                return columnMap;
+            }
+            
+            // Mostrar vista previa de datos
+            function showDataPreview(data) {
+                if (!data.length) {
+                    dataPreview.innerHTML = '<p>No hay datos para mostrar.</p>';
+                    return;
+                }
+                
+                let html = '<table>';
+                html += '<tr><th>Código</th><th>Descripción</th><th>Rubro</th><th>Precio</th></tr>';
+                
+                data.forEach(product => {
+                    html += `
+                        <tr>
+                            <td>${product.codigo}</td>
+                            <td>${product.descripcion.substring(0, 30)}${product.descripcion.length > 30 ? '...' : ''}</td>
+                            <td>${product.rubro.substring(0, 15)}${product.rubro.length > 15 ? '...' : ''}</td>
+                            <td>$${product.precio_venta.toFixed(2)}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</table>';
+                
+                if (productsData.length > 10) {
+                    html += `<p style="text-align: center; margin-top: 10px;">... y ${productsData.length - 10} productos más</p>`;
+                }
+                
+                dataPreview.innerHTML = html;
+            }
+        });
+    </script>
+</body>
+</html>
