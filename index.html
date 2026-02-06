@@ -2,143 +2,88 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Listado de Precios - Ferretería Carnevale</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Ferretería Carnevale - Lista de Precios</title>
+    <meta name="theme-color" content="#2c3e50">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="preload" href="app.js" as="script">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛠️</text></svg>">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="app-header">
+    <!-- Solo elementos críticos visibles inicialmente -->
+    <div class="app-container" id="appContainer">
+        <header class="app-header" id="appHeader">
             <div class="header-content">
-                <h1><i class="fas fa-tools"></i> FERRETERÍA CARNEVALE</h1>
-                <p class="subtitle">Listado de precios - Consultas por WhatsApp</p>
-                <div class="last-update">
-                    <i class="fas fa-sync-alt"></i>
-                    <span id="updateDate">Actualizado semanalmente</span>
+                <h1>🛠️ FERRETERÍA CARNEVALE</h1>
+                <p class="subtitle">Lista de precios - Buscador rápido</p>
+                <div class="stats">
+                    <span id="productCount">Cargando...</span>
                 </div>
             </div>
         </header>
 
-        <!-- Controles de búsqueda y filtro -->
-        <div class="controls-container">
-            <!-- Barra de búsqueda -->
-            <div class="search-container">
-                <div class="search-box">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="searchInput" placeholder="Buscar por descripción, código o marca...">
-                    <button id="clearSearch" class="clear-btn" aria-label="Limpiar búsqueda">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="search-hint">
-                    <i class="fas fa-info-circle"></i>
-                    Busca por nombre, código de producto o marca
+        <div class="search-section">
+            <div class="search-box-container">
+                <input 
+                    type="search" 
+                    id="searchInput" 
+                    placeholder="Buscar producto..." 
+                    autocapitalize="off"
+                    autocomplete="off"
+                    enterkeyhint="search"
+                >
+                <div class="search-actions">
+                    <button id="clearBtn" class="icon-btn" aria-label="Limpiar búsqueda">×</button>
                 </div>
             </div>
-
-            <!-- Filtros -->
-            <div class="filters-container">
-                <div class="filter-group">
-                    <label for="rubroFilter"><i class="fas fa-filter"></i> Filtrar por rubro:</label>
-                    <select id="rubroFilter">
-                        <option value="">Todos los rubros</option>
-                        <!-- Los rubros se cargarán dinámicamente -->
-                    </select>
-                </div>
-                
-                <div class="filter-group">
-                    <label for="sortFilter"><i class="fas fa-sort-amount-down"></i> Ordenar por:</label>
-                    <select id="sortFilter">
-                        <option value="descripcion">Descripción (A-Z)</option>
-                        <option value="precio_asc">Precio (Menor a Mayor)</option>
-                        <option value="precio_desc">Precio (Mayor a Menor)</option>
-                        <option value="codigo">Código</option>
-                    </select>
-                </div>
+            
+            <div class="quick-filters">
+                <select id="rubroFilter" class="mobile-select">
+                    <option value="">Todos los rubros</option>
+                </select>
+                <select id="sortFilter" class="mobile-select">
+                    <option value="relevance">Relevancia</option>
+                    <option value="price_asc">Precio ↑</option>
+                    <option value="price_desc">Precio ↓</option>
+                </select>
             </div>
         </div>
 
-        <!-- Información de resultados -->
-        <div class="results-info">
-            <div class="product-count">
-                <i class="fas fa-cube"></i>
-                <span id="productCount">Cargando productos...</span>
-            </div>
-            <div class="mobile-instructions">
-                <i class="fas fa-mobile-alt"></i> Toca un producto para ver detalles
-            </div>
+        <!-- Contenedor virtualizado -->
+        <div class="products-viewport" id="productsViewport">
+            <div class="products-container" id="productsContainer"></div>
+            <div class="scroll-spacer" id="scrollSpacer"></div>
         </div>
 
-        <!-- Lista de productos -->
-        <div class="products-container" id="productsContainer">
-            <!-- Los productos se cargarán aquí dinámicamente -->
-            <div class="loading-spinner">
-                <div class="spinner"></div>
-                <p>Cargando listado de precios...</p>
-            </div>
+        <!-- Loading states -->
+        <div class="loading-indicator" id="loadingIndicator">
+            <div class="spinner"></div>
+            <p>Cargando productos...</p>
         </div>
 
-        <!-- Mensaje sin resultados -->
-        <div class="no-results" id="noResults" style="display: none;">
-            <i class="fas fa-search"></i>
-            <h3>No se encontraron productos</h3>
-            <p>Intenta con otros términos de búsqueda o selecciona otro rubro</p>
+        <div class="empty-state" id="emptyState">
+            <p>Ingresa un término para buscar productos</p>
         </div>
 
-        <!-- Botón flotante para subir -->
-        <button class="scroll-top-btn" id="scrollTopBtn" aria-label="Volver arriba">
-            <i class="fas fa-arrow-up"></i>
-        </button>
+        <div class="no-results" id="noResults">
+            <p>No se encontraron productos</p>
+            <button id="resetSearch" class="text-btn">Mostrar todos</button>
+        </div>
 
-        <!-- Footer -->
+        <!-- Footer ligero -->
         <footer class="app-footer">
-            <div class="footer-content">
-                <div class="footer-section">
-                    <h3><i class="fas fa-store"></i> Ferretería Carnevale</h3>
-                    <p>Sistema de consulta de precios</p>
-                </div>
-                <div class="footer-section">
-                    <h3><i class="fas fa-info-circle"></i> Información</h3>
-                    <p>Los precios están sujetos a cambios sin previo aviso</p>
-                    <p>Consultar stock al momento de la compra</p>
-                </div>
-                <div class="footer-section">
-                    <h3><i class="fas fa-clock"></i> Actualización</h3>
-                    <p>Listado actualizado 1-2 veces por semana</p>
-                    <p id="footerDate"></p>
-                </div>
-            </div>
-            <div class="copyright">
-                <p>&copy; 2023 Ferretería Carnevale - Todos los derechos reservados</p>
-            </div>
+            <p>Actualizado semanalmente • Consultas por WhatsApp</p>
         </footer>
     </div>
 
-    <!-- Modal para detalles del producto -->
-    <div class="modal" id="productModal">
+    <!-- Modal optimizado -->
+    <dialog id="productModal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="modalTitle">Detalles del producto</h2>
-                <button class="close-modal" id="closeModal">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="modal-product-info">
-                    <p><strong>Código:</strong> <span id="modalCodigo"></span></p>
-                    <p><strong>Descripción:</strong> <span id="modalDescripcion"></span></p>
-                    <p><strong>Marca:</strong> <span id="modalMarca"></span></p>
-                    <p><strong>Rubro:</strong> <span id="modalRubro"></span></p>
-                    <p class="modal-price"><strong>Precio:</strong> $<span id="modalPrecio"></span></p>
-                </div>
-                <button class="whatsapp-btn large" id="modalWhatsAppBtn">
-                    <i class="fab fa-whatsapp"></i> Consultar por WhatsApp
-                </button>
-            </div>
+            <button id="closeModal" class="modal-close">×</button>
+            <div id="modalContent"></div>
         </div>
-    </div>
+    </dialog>
 
-    <script src="app.js"></script>
+    <script src="app.js" defer></script>
 </body>
 </html>
