@@ -1,326 +1,363 @@
 // ==============================================
-// SISTEMA DE BÚSQUEDA OPTIMIZADO PARA MÓVIL
-// Ferretería Carnevale - Versión Ultra Lite
+// SISTEMA DE BÚSQUEDA COMERCIAL FERRETERÍA
+// Versión optimizada para móvil +6000 productos
 // ==============================================
 
-class OptimizedProductSearch {
+class FerreteriaSearchSystem {
     constructor() {
-        // Configuración de performance
+        // CONFIGURACIÓN COMERCIAL
         this.CONFIG = {
-            BATCH_SIZE: 30,
-            DEBOUNCE_MS: 300,
-            LAZY_LOAD_THRESHOLD: 100,
-            MAX_RESULTS: 100,
-            CACHE_SIZE: 50
+            MAX_RESULTS: 25,           // Máximo de resultados relevantes
+            DEBOUNCE_MS: 350,          // Debounce optimizado para móvil
+            MIN_SCORE: 0.15,           // Puntaje mínimo para mostrar
+            BATCH_SIZE: 15,            // Renderizado por lotes
+            CACHE_SIZE: 50,            // Cache de búsquedas LRU
+            SCORE_WEIGHTS: {
+                CODIGO_EXACTO: 100,
+                CODIGO_STARTS_WITH: 50,
+                CODIGO_CONTAINS: 30,
+                DESCRIPCION_EXACTA: 40,
+                DESCRIPCION_PALABRA: 35,
+                DESCRIPCION_CONTAINS: 20,
+                MARCA_EXACTA: 25,
+                MARCA_CONTAINS: 15,
+                RUBRO_EXACTO: 10,
+                MULTIPLE_MATCHES: 5
+            }
         };
 
-        // Estado de la aplicación
+        // ESTADO DE LA APLICACIÓN
         this.state = {
-            products: [],
-            filtered: [],
-            visible: [],
-            rubros: new Set(),
-            searchIndex: new Map(),
-            loading: false,
-            searchTerm: '',
-            currentRubro: '',
-            sortBy: 'relevance',
-            offset: 0,
-            hasMore: false
+            products: [],               // Productos originales
+            normalizedData: [],         // Datos normalizados para búsqueda
+            searchIndex: new Map(),     // Índice invertido por palabra
+            rubros: new Set(),          // Rubros únicos
+            searchTerm: '',             // Término actual de búsqueda
+            currentRubro: '',           // Rubro seleccionado
+            results: [],                // Resultados actuales (con score)
+            offset: 0,                  // Offset para scroll infinito
+            hasMore: false,             // Si hay más resultados
+            isLoading: false,           // Estado de carga
+            lastSearchTime: 0           // Tiempo de última búsqueda
         };
 
-        // Cache de resultados
-        this.cache = new Map();
-        this.searchCache = new Map();
+        // CACHE Y OPTIMIZACIONES
+        this.searchCache = new Map();   // Cache LRU de búsquedas
+        this.nodePool = [];             // Pool de nodos DOM reutilizables
+        this.debounceTimer = null;      // Timer para debounce
         
-        // Referencias a DOM
+        // REFERENCIAS DOM
         this.refs = {};
         
-        // Pool de nodos reutilizables
-        this.nodePool = {
-            cards: [],
-            currentIndex: 0
+        // ESTADÍSTICAS
+        this.stats = {
+            totalProducts: 0,
+            searchCount: 0,
+            avgSearchTime: 0
         };
 
-        // Inicialización diferida
+        // INICIALIZAR
         this.init();
     }
 
     // ==============================================
-    // 1. INICIALIZACIÓN OPTIMIZADA
+    // 1. INICIALIZACIÓN DEL SISTEMA
     // ==============================================
 
     async init() {
-        this.cacheDOM();
-        this.setupEventDelegation();
-        this.setupIntersectionObserver();
-        await this.loadData();
-        this.setupInitialState();
+        try {
+            // Ocultar critical loading
+            this.hideCriticalLoading();
+            
+            // Cachear referencias DOM
+            this.cacheDOMReferences();
+            
+            // Configurar event listeners
+            this.setupEventListeners();
+            
+            // Cargar productos
+            await this.loadProducts();
+            
+            // Construir estructuras de búsqueda
+            this.buildSearchStructures();
+            
+            // Configurar UI inicial
+            this.setupInitialUI();
+            
+            // Mostrar UI principal
+            this.showMainUI();
+            
+        } catch (error) {
+            console.error('Error inicializando sistema:', error);
+            this.showFatalError(error);
+        }
     }
 
-    cacheDOM() {
-        // Solo cachear elementos críticos
+    hideCriticalLoading() {
+        const loadingEl = document.getElementById('criticalLoading');
+        if (loadingEl) {
+            loadingEl.style.opacity = '0';
+            setTimeout(() => {
+                loadingEl.style.display = 'none';
+            }, 300);
+        }
+    }
+
+    showMainUI() {
+        const appContainer = document.getElementById('appContainer');
+        if (appContainer) {
+            appContainer.style.display = 'block';
+            setTimeout(() => {
+                appContainer.style.opacity = '1';
+            }, 50);
+        }
+    }
+
+    cacheDOMReferences() {
         this.refs = {
+            // Inputs y controles
             searchInput: document.getElementById('searchInput'),
-            productsContainer: document.getElementById('productsContainer'),
-            productsViewport: document.getElementById('productsViewport'),
+            clearBtn: document.getElementById('clearBtn'),
             rubroFilter: document.getElementById('rubroFilter'),
             sortFilter: document.getElementById('sortFilter'),
-            productCount: document.getElementById('productCount'),
-            loadingIndicator: document.getElementById('loadingIndicator'),
+            resetSearch: document.getElementById('resetSearch'),
+            
+            // Contenedores
+            productsContainer: document.getElementById('productsContainer'),
+            productsViewport: document.getElementById('productsViewport'),
+            scrollLoader: document.getElementById('scrollLoader'),
+            
+            // Estados
             emptyState: document.getElementById('emptyState'),
             noResults: document.getElementById('noResults'),
-            clearBtn: document.getElementById('clearBtn'),
-            resetSearch: document.getElementById('resetSearch'),
-            modal: document.getElementById('productModal'),
-            closeModal: document.getElementById('closeModal'),
-            modalContent: document.getElementById('modalContent')
+            loadingState: document.getElementById('loadingState'),
+            
+            // Información
+            productCount: document.getElementById('productCount'),
+            resultsCount: document.getElementById('resultsCount'),
+            searchTime: document.getElementById('searchTime'),
+            resultsInfo: document.getElementById('resultsInfo'),
+            lastUpdate: document.getElementById('lastUpdate'),
+            
+            // Modal
+            modalOverlay: document.getElementById('modalOverlay'),
+            modalClose: document.getElementById('modalClose'),
+            modalBody: document.getElementById('modalBody'),
+            modalWhatsAppBtn: document.getElementById('modalWhatsAppBtn')
         };
     }
 
-    setupEventDelegation() {
-        // Eventos de búsqueda con debounce
-        this.refs.searchInput?.addEventListener('input', 
-            this.debounce(this.handleSearch.bind(this), this.CONFIG.DEBOUNCE_MS)
-        );
-        
-        // Eventos de cambio en filtros
-        this.refs.rubroFilter?.addEventListener('change', this.handleFilterChange.bind(this));
-        this.refs.sortFilter?.addEventListener('change', this.handleFilterChange.bind(this));
-        
-        // Eventos de clic
-        document.addEventListener('click', this.handleClick.bind(this));
-        
-        // Eventos de scroll (passive para mejor performance)
-        this.refs.productsViewport?.addEventListener('scroll', 
-            this.handleScroll.bind(this), 
-            { passive: true }
-        );
-        
-        // Eventos del modal
-        this.refs.closeModal?.addEventListener('click', () => this.refs.modal?.close());
-        this.refs.modal?.addEventListener('click', (e) => {
-            if (e.target === this.refs.modal) this.refs.modal.close();
+    setupEventListeners() {
+        // Evento de búsqueda con debounce
+        this.refs.searchInput?.addEventListener('input', (e) => {
+            this.handleSearchInput(e.target.value);
         });
-        
-        // Eventos de botones
+
+        // Botón clear
         this.refs.clearBtn?.addEventListener('click', () => {
-            this.refs.searchInput.value = '';
-            this.refs.clearBtn.style.display = 'none';
-            this.state.searchTerm = '';
-            this.showEmptyState();
+            this.clearSearch();
         });
-        
+
+        // Filtro por rubro
+        this.refs.rubroFilter?.addEventListener('change', (e) => {
+            this.state.currentRubro = e.target.value;
+            this.performSearch();
+        });
+
+        // Ordenamiento
+        this.refs.sortFilter?.addEventListener('change', (e) => {
+            this.sortResults(e.target.value);
+            this.renderResults();
+        });
+
+        // Reset search
         this.refs.resetSearch?.addEventListener('click', () => {
-            this.refs.searchInput.value = '';
-            this.state.searchTerm = '';
-            this.state.filtered = [];
-            this.showEmptyState();
+            this.resetSearch();
         });
-    }
 
-    setupIntersectionObserver() {
-        // Observer para lazy loading de productos
-        if ('IntersectionObserver' in window) {
-            this.observer = new IntersectionObserver(
-                (entries) => {
-                    entries.forEach(entry => {
-                        if (entry.isIntersecting && this.state.hasMore && !this.state.loading) {
-                            this.loadMoreProducts();
-                        }
-                    });
-                },
-                { 
-                    root: this.refs.productsViewport, 
-                    rootMargin: '50px',
-                    threshold: 0.1 
-                }
-            );
-        }
+        // Scroll infinito
+        this.refs.productsViewport?.addEventListener('scroll', () => {
+            this.handleScroll();
+        }, { passive: true });
+
+        // Modal
+        this.refs.modalClose?.addEventListener('click', () => {
+            this.hideModal();
+        });
+
+        this.refs.modalOverlay?.addEventListener('click', (e) => {
+            if (e.target === this.refs.modalOverlay) {
+                this.hideModal();
+            }
+        });
+
+        // Cerrar modal con ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.refs.modalOverlay.style.display === 'block') {
+                this.hideModal();
+            }
+        });
+
+        // Delegación de eventos para botones de producto
+        document.addEventListener('click', (e) => this.handleProductClick(e));
     }
 
     // ==============================================
-    // 2. CARGA DE DATOS EFICIENTE (CORREGIDO)
+    // 2. CARGA Y PROCESAMIENTO DE DATOS
     // ==============================================
 
-    async loadData() {
-        this.showLoading();
+    async loadProducts() {
+        this.showLoadingState();
         
         try {
-            // Stream de datos con fetch optimizado
+            const startTime = performance.now();
             const response = await fetch('products.json', {
-                priority: 'high',
-                cache: 'force-cache'
+                cache: 'force-cache',
+                headers: {
+                    'Cache-Control': 'max-age=3600'
+                }
             });
-
-            if (!response.ok) throw new Error('Error cargando datos');
-
-            // Parseo incremental
-            const data = await response.json();
             
-            // Procesamiento en lotes para no bloquear UI
-            await this.processDataInBatches(data);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
             
-            // Construir índice de búsqueda DESPUÉS de procesar todos los datos
-            this.buildSearchIndex();
-            this.updateRubroFilter();
-            this.updateProductCount();
+            const products = await response.json();
+            const loadTime = performance.now() - startTime;
             
-            this.hideLoading();
-            this.showEmptyState();
+            console.log(`✅ Productos cargados: ${products.length} en ${loadTime.toFixed(0)}ms`);
+            
+            // Procesar productos
+            this.processProducts(products);
+            
+            // Actualizar estadísticas
+            this.stats.totalProducts = products.length;
+            
+            // Actualizar fecha de actualización
+            this.updateLastUpdateDate();
+            
+            this.hideLoadingState();
             
         } catch (error) {
-            console.error('Error loading products:', error);
-            this.showError();
+            console.error('❌ Error cargando productos:', error);
+            this.showErrorState('No se pudieron cargar los productos. Verifica la conexión.');
+            throw error;
         }
     }
 
-    async processDataInBatches(data) {
-        const batchSize = 1000;
-        const totalBatches = Math.ceil(data.length / batchSize);
+    processProducts(products) {
+        const startTime = performance.now();
         
-        for (let i = 0; i < totalBatches; i++) {
-            const start = i * batchSize;
-            const end = start + batchSize;
-            const batch = data.slice(start, end);
-            
-            // Procesar batch sin bloquear
-            await this.processBatch(batch);
-            
-            // Liberar control al event loop cada 5 batches
-            if (i % 5 === 0) {
-                await this.yieldToMainThread();
+        // Limpiar datos anteriores
+        this.state.products = [];
+        this.state.normalizedData = [];
+        this.state.rubros.clear();
+        
+        // Procesar cada producto
+        products.forEach((product, index) => {
+            // Validar datos mínimos
+            if (!product.codigo || !product.descripcion || !product.precio_venta) {
+                return; // Saltar producto incompleto
             }
-        }
-    }
-
-    async processBatch(batch) {
-        return new Promise(resolve => {
-            // Usar requestIdleCallback o setTimeout para no bloquear
-            if ('requestIdleCallback' in window) {
-                requestIdleCallback(() => {
-                    this.processBatchSync(batch);
-                    resolve();
-                });
-            } else {
-                // Fallback para navegadores que no soportan requestIdleCallback
-                setTimeout(() => {
-                    this.processBatchSync(batch);
-                    resolve();
-                }, 0);
-            }
-        });
-    }
-
-    processBatchSync(batch) {
-        batch.forEach(product => {
-            // Normalización y almacenamiento eficiente
-            const normalized = this.normalizeProduct(product);
-            this.state.products.push(normalized);
             
-            // Agrupar rubros (esto es síncrono y rápido)
+            // Crear objeto normalizado UNA VEZ
+            const normalized = {
+                index: index,
+                codigo: String(product.codigo).trim(),
+                descripcion: String(product.descripcion).trim(),
+                rubro: String(product.rubro || '').trim(),
+                marca: String(product.marca || '').trim(),
+                precio_venta: Number(product.precio_venta) || 0,
+                
+                // Campos normalizados para búsqueda (creados una sola vez)
+                searchText: this.normalizeSearchText(
+                    `${product.codigo} ${product.descripcion} ${product.marca} ${product.rubro}`
+                ),
+                codigoNormalized: this.normalizeText(product.codigo),
+                descripcionNormalized: this.normalizeText(product.descripcion),
+                marcaNormalized: this.normalizeText(product.marca || ''),
+                rubroNormalized: this.normalizeText(product.rubro || '')
+            };
+            
+            // Guardar productos
+            this.state.products.push({
+                ...product,
+                codigo: normalized.codigo,
+                descripcion: normalized.descripcion,
+                rubro: normalized.rubro,
+                marca: normalized.marca,
+                precio_venta: normalized.precio_venta
+            });
+            
+            this.state.normalizedData.push(normalized);
+            
+            // Agregar rubro
             if (normalized.rubro) {
                 this.state.rubros.add(normalized.rubro);
             }
         });
-    }
-
-    yieldToMainThread() {
-        return new Promise(resolve => setTimeout(resolve, 0));
-    }
-
-    normalizeProduct(product) {
-        return {
-            codigo: String(product.codigo || '').trim(),
-            descripcion: String(product.descripcion || '').trim(),
-            rubro: String(product.rubro || '').trim(),
-            marca: String(product.marca || '').trim(),
-            precio_venta: Number(product.precio_venta) || 0,
-            searchable: this.normalizeString(
-                `${product.descripcion} ${product.codigo} ${product.marca} ${product.rubro}`
-            )
-        };
-    }
-
-    // ==============================================
-    // 3. INDEXACIÓN Y BÚSQUEDA ÓPTIMA (CORREGIDO)
-    // ==============================================
-
-    buildSearchIndex() {
-        // Índice invertido para búsqueda O(1)
-        this.state.searchIndex.clear();
         
-        this.state.products.forEach((product, index) => {
-            // Indexar por tokens
-            const tokens = this.getSearchTokens(product);
-            tokens.forEach(token => {
-                if (!this.state.searchIndex.has(token)) {
-                    this.state.searchIndex.set(token, new Set());
-                }
-                this.state.searchIndex.get(token).add(index);
-            });
-        });
+        const processTime = performance.now() - startTime;
+        console.log(`✅ Productos procesados: ${this.state.products.length} en ${processTime.toFixed(0)}ms`);
     }
 
-    getSearchTokens(product) {
-        const tokens = new Set();
-        
-        // Normalizar y tokenizar cada campo
-        const fields = [
-            product.descripcion,
-            product.codigo,
-            product.marca,
-            product.rubro
-        ];
-        
-        fields.forEach(field => {
-            if (field && field.length > 0) {
-                const normalized = this.normalizeString(field);
-                const words = normalized.split(/\s+/);
-                words.forEach(word => {
-                    if (word.length >= 2) {
-                        tokens.add(word);
-                        // También agregar prefijos para búsqueda incremental
-                        for (let i = 2; i <= word.length; i++) {
-                            tokens.add(word.substring(0, i));
-                        }
-                    }
-                });
-            }
-        });
-        
-        return Array.from(tokens);
-    }
-
-    normalizeString(str) {
-        if (!str) return '';
-        return str
-            .toLowerCase()
-            .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove accents
-            .replace(/[^a-z0-9\s]/g, ' ') // Keep only alphanumeric
-            .replace(/\s+/g, ' ') // Normalize spaces
+    normalizeSearchText(text) {
+        // Normalización COMPLETA para búsqueda (hacer solo una vez)
+        return this.normalizeText(text)
+            .replace(/[^a-z0-9\s]/g, ' ')   // Eliminar símbolos
+            .replace(/\s+/g, ' ')           // Unificar espacios
             .trim();
     }
 
-    // ==============================================
-    // 4. BÚSQUEDA CON DEBOUNCE Y CACHE
-    // ==============================================
-
-    debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
+    normalizeText(text) {
+        // Normalización básica: minúsculas y sin acentos
+        return text
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
     }
 
-    handleSearch(e) {
-        const searchTerm = e.target.value.trim();
-        this.state.searchTerm = searchTerm;
+    // ==============================================
+    // 3. CONSTRUCCIÓN DE ÍNDICES DE BÚSQUEDA
+    // ==============================================
+
+    buildSearchStructures() {
+        const startTime = performance.now();
+        
+        // Limpiar índice anterior
+        this.state.searchIndex.clear();
+        
+        // Construir índice invertido por palabra
+        this.state.normalizedData.forEach((product, index) => {
+            // Obtener palabras únicas del searchText
+            const words = new Set(product.searchText.split(/\s+/));
+            
+            // Indexar cada palabra
+            words.forEach(word => {
+                if (word.length >= 2) { // Ignorar palabras muy cortas
+                    if (!this.state.searchIndex.has(word)) {
+                        this.state.searchIndex.set(word, new Set());
+                    }
+                    this.state.searchIndex.get(word).add(index);
+                }
+            });
+        });
+        
+        // Actualizar UI
+        this.updateRubroFilter();
+        this.updateProductCount();
+        
+        const indexTime = performance.now() - startTime;
+        console.log(`✅ Índice construido: ${this.state.searchIndex.size} palabras únicas en ${indexTime.toFixed(0)}ms`);
+    }
+
+    // ==============================================
+    // 4. SISTEMA DE BÚSQUEDA CON SCORING COMERCIAL
+    // ==============================================
+
+    handleSearchInput(searchTerm) {
+        // Actualizar término
+        this.state.searchTerm = searchTerm.trim();
         
         // Mostrar/ocultar botón clear
         if (this.refs.clearBtn) {
@@ -333,164 +370,218 @@ class OptimizedProductSearch {
             return;
         }
         
-        // Realizar búsqueda
-        this.performSearch(searchTerm);
+        // Debounce de búsqueda
+        clearTimeout(this.debounceTimer);
+        this.debounceTimer = setTimeout(() => {
+            this.performSearch();
+        }, this.CONFIG.DEBOUNCE_MS);
     }
 
-    performSearch(searchTerm) {
-        const normalizedSearch = this.normalizeString(searchTerm);
-        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2);
+    performSearch() {
+        const startTime = performance.now();
         
-        if (searchWords.length === 0) {
-            this.state.filtered = [];
-            this.renderResults();
-            return;
-        }
-        
-        // Verificar cache primero
-        const cacheKey = `${searchTerm}-${this.state.currentRubro}-${this.state.sortBy}`;
-        
+        // Verificar cache
+        const cacheKey = this.getCacheKey();
         if (this.searchCache.has(cacheKey)) {
-            this.state.filtered = this.searchCache.get(cacheKey);
+            this.state.results = this.searchCache.get(cacheKey);
             this.renderResults();
+            
+            const cacheTime = performance.now() - startTime;
+            this.updateSearchStats(cacheTime, true);
             return;
         }
         
-        // Buscar en índice invertido
-        let resultIndices = new Set();
+        // Buscar productos relevantes
+        const relevantProducts = this.findRelevantProducts();
+        
+        // Calcular scores
+        const scoredResults = this.calculateProductScores(relevantProducts);
+        
+        // Filtrar y ordenar
+        this.state.results = scoredResults
+            .filter(result => result.score >= this.CONFIG.MIN_SCORE)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, this.CONFIG.MAX_RESULTS);
+        
+        // Cachear resultados
+        this.cacheSearchResults(cacheKey);
+        
+        // Renderizar
+        this.renderResults();
+        
+        // Actualizar estadísticas
+        const searchTime = performance.now() - startTime;
+        this.updateSearchStats(searchTime, false);
+    }
+
+    findRelevantProducts() {
+        if (!this.state.searchTerm) return [];
+        
+        const searchWords = this.normalizeSearchText(this.state.searchTerm)
+            .split(/\s+/)
+            .filter(word => word.length >= 2);
+        
+        if (searchWords.length === 0) return [];
+        
+        // Encontrar productos que contengan TODAS las palabras (AND lógico)
+        let productIndices = null;
         
         searchWords.forEach((word, index) => {
-            const wordResults = this.state.searchIndex.get(word) || new Set();
+            const indices = this.state.searchIndex.get(word) || new Set();
             
             if (index === 0) {
-                resultIndices = new Set(wordResults);
+                productIndices = new Set(indices);
             } else {
-                // Intersección para AND search
-                resultIndices = new Set(
-                    [...resultIndices].filter(x => wordResults.has(x))
+                // Intersección de conjuntos
+                productIndices = new Set(
+                    [...productIndices].filter(idx => indices.has(idx))
                 );
             }
         });
         
+        if (!productIndices || productIndices.size === 0) {
+            return [];
+        }
+        
         // Convertir índices a productos
-        this.state.filtered = Array.from(resultIndices)
-            .map(idx => this.state.products[idx])
-            .filter(product => {
-                // Filtrar por rubro si está seleccionado
-                if (this.state.currentRubro && product.rubro !== this.state.currentRubro) {
-                    return false;
-                }
-                return product.precio_venta > 0;
-            });
-        
-        // Ordenar resultados
-        this.sortResults();
-        
-        // Cachear resultados (LRU cache)
-        if (this.searchCache.size >= this.CONFIG.CACHE_SIZE) {
-            const firstKey = this.searchCache.keys().next().value;
-            this.searchCache.delete(firstKey);
-        }
-        this.searchCache.set(cacheKey, [...this.state.filtered]);
-        
-        // Renderizar resultados
-        this.renderResults();
+        return Array.from(productIndices).map(index => ({
+            product: this.state.products[index],
+            normalized: this.state.normalizedData[index],
+            index: index
+        }));
     }
 
-    handleFilterChange() {
-        this.state.currentRubro = this.refs.rubroFilter?.value || '';
-        this.state.sortBy = this.refs.sortFilter?.value || 'relevance';
-        
-        // Si hay término de búsqueda, re-buscar con nuevos filtros
-        if (this.state.searchTerm) {
-            this.performSearch(this.state.searchTerm);
-        } else if (this.state.currentRubro) {
-            // Filtrar por rubro sin búsqueda
-            this.state.filtered = this.state.products.filter(product => {
-                if (this.state.currentRubro && product.rubro !== this.state.currentRubro) {
-                    return false;
-                }
-                return true;
-            });
-            this.sortResults();
-            this.renderResults();
-        } else {
-            // Sin filtros ni búsqueda, mostrar estado inicial
-            this.showEmptyState();
+    calculateProductScores(products) {
+        if (!this.state.searchTerm || products.length === 0) {
+            return [];
         }
-    }
-
-    sortResults() {
-        const { filtered, sortBy } = this.state;
         
-        filtered.sort((a, b) => {
-            switch (sortBy) {
-                case 'price_asc':
-                    return a.precio_venta - b.precio_venta;
-                case 'price_desc':
-                    return b.precio_venta - a.precio_venta;
-                case 'relevance':
-                default:
-                    // Mantener orden de relevancia (score de búsqueda)
-                    return 0;
+        const searchWords = this.normalizeSearchText(this.state.searchTerm)
+            .split(/\s+/)
+            .filter(word => word.length >= 2);
+        
+        return products.map(item => {
+            let score = 0;
+            const { normalized } = item;
+            
+            searchWords.forEach(word => {
+                // 1. PUNTUACIÓN POR CÓDIGO (MÁXIMA PRIORIDAD)
+                if (normalized.codigoNormalized === word) {
+                    score += this.CONFIG.SCORE_WEIGHTS.CODIGO_EXACTO;
+                } else if (normalized.codigoNormalized.startsWith(word)) {
+                    score += this.CONFIG.SCORE_WEIGHTS.CODIGO_STARTS_WITH;
+                } else if (normalized.codigoNormalized.includes(word)) {
+                    score += this.CONFIG.SCORE_WEIGHTS.CODIGO_CONTAINS;
+                }
+                
+                // 2. PUNTUACIÓN POR DESCRIPCIÓN (ALTA PRIORIDAD)
+                const descWords = normalized.descripcionNormalized.split(/\s+/);
+                if (descWords.includes(word)) {
+                    score += this.CONFIG.SCORE_WEIGHTS.DESCRIPCION_PALABRA;
+                } else if (normalized.descripcionNormalized.includes(word)) {
+                    score += this.CONFIG.SCORE_WEIGHTS.DESCRIPCION_CONTAINS;
+                }
+                
+                // 3. PUNTUACIÓN POR MARCA
+                if (normalized.marcaNormalized === word) {
+                    score += this.CONFIG.SCORE_WEIGHTS.MARCA_EXACTA;
+                } else if (normalized.marcaNormalized.includes(word)) {
+                    score += this.CONFIG.SCORE_WEIGHTS.MARCA_CONTAINS;
+                }
+                
+                // 4. PUNTUACIÓN POR RUBRO
+                if (normalized.rubroNormalized === word) {
+                    score += this.CONFIG.SCORE_WEIGHTS.RUBRO_EXACTO;
+                }
+                
+                // 5. COINCIDENCIAS MÚLTIPLES EN SEARCH TEXT
+                const regex = new RegExp(`\\b${word}\\b`, 'g');
+                const matches = normalized.searchText.match(regex);
+                if (matches) {
+                    score += matches.length * this.CONFIG.SCORE_WEIGHTS.MULTIPLE_MATCHES;
+                }
+            });
+            
+            // Penalizar si no coincide con rubro filtrado
+            if (this.state.currentRubro && 
+                item.product.rubro !== this.state.currentRubro) {
+                score = 0;
             }
+            
+            return {
+                ...item,
+                score: score / 100 // Normalizar a escala 0-1
+            };
         });
     }
 
+    getCacheKey() {
+        return `${this.state.searchTerm}-${this.state.currentRubro}`;
+    }
+
+    cacheSearchResults(key) {
+        // LRU Cache - eliminar la entrada más antigua si se excede el tamaño
+        if (this.searchCache.size >= this.CONFIG.CACHE_SIZE) {
+            const oldestKey = this.searchCache.keys().next().value;
+            this.searchCache.delete(oldestKey);
+        }
+        
+        this.searchCache.set(key, [...this.state.results]);
+    }
+
     // ==============================================
-    // 5. RENDERIZADO VIRTUALIZADO Y OPTIMIZADO
+    // 5. RENDERIZADO OPTIMIZADO PARA MÓVIL
     // ==============================================
 
     renderResults() {
-        // Resetear offset y estado
+        // Resetear estado
         this.state.offset = 0;
-        this.state.hasMore = this.state.filtered.length > this.CONFIG.BATCH_SIZE;
+        this.state.hasMore = this.state.results.length > this.CONFIG.BATCH_SIZE;
         
         // Limpiar container eficientemente
-        this.clearContainer();
+        this.clearProductsContainer();
         
-        if (this.state.filtered.length === 0) {
-            this.showNoResults();
+        if (this.state.results.length === 0) {
+            this.showNoResultsState();
             return;
         }
         
-        // Ocultar estados vacíos
-        this.refs.emptyState?.classList.remove('active');
-        this.refs.noResults?.classList.remove('active');
+        // Ocultar estados
+        this.hideAllStates();
+        
+        // Mostrar contenedor de productos
         this.refs.productsContainer.style.display = 'grid';
         
         // Renderizar primer lote
-        this.renderNextBatch();
+        this.renderProductBatch();
         
-        // Actualizar contador
-        this.updateProductCount();
+        // Actualizar información
+        this.updateResultsInfo();
     }
 
-    clearContainer() {
-        const container = this.refs.productsContainer;
-        if (!container) return;
+    clearProductsContainer() {
+        if (!this.refs.productsContainer) return;
         
-        // Mover nodos existentes al pool para reutilizar
-        while (container.firstChild) {
-            const node = container.firstChild;
-            container.removeChild(node);
-            this.nodePool.cards.push(node);
+        // Reutilizar nodos existentes en el pool
+        while (this.refs.productsContainer.firstChild) {
+            const node = this.refs.productsContainer.firstChild;
+            this.refs.productsContainer.removeChild(node);
+            this.nodePool.push(node);
         }
-        
-        // Resetear índice del pool
-        this.nodePool.currentIndex = 0;
     }
 
-    renderNextBatch() {
-        const start = this.state.offset;
-        const end = Math.min(start + this.CONFIG.BATCH_SIZE, this.state.filtered.length);
-        const batch = this.state.filtered.slice(start, end);
+    renderProductBatch() {
+        if (this.state.results.length === 0) return;
         
-        // Usar DocumentFragment para batch update
+        const start = this.state.offset;
+        const end = Math.min(start + this.CONFIG.BATCH_SIZE, this.state.results.length);
+        const batch = this.state.results.slice(start, end);
+        
+        // Usar DocumentFragment para batch rendering
         const fragment = document.createDocumentFragment();
         
-        batch.forEach(product => {
-            const node = this.getProductNode(product);
+        batch.forEach(result => {
+            const node = this.createProductCard(result);
             fragment.appendChild(node);
         });
         
@@ -498,120 +589,105 @@ class OptimizedProductSearch {
         
         // Actualizar estado
         this.state.offset = end;
-        this.state.hasMore = end < this.state.filtered.length;
+        this.state.hasMore = end < this.state.results.length;
         
-        // Observar último elemento para infinite scroll
-        if (this.state.hasMore && this.observer && this.refs.productsContainer.lastChild) {
-            this.observer.observe(this.refs.productsContainer.lastChild);
+        // Ocultar loader de scroll
+        if (this.refs.scrollLoader) {
+            this.refs.scrollLoader.style.display = 'none';
         }
     }
 
-    getProductNode(product) {
+    createProductCard(result) {
         // Reutilizar nodo del pool si está disponible
-        if (this.nodePool.currentIndex < this.nodePool.cards.length) {
-            const node = this.nodePool.cards[this.nodePool.currentIndex];
-            this.updateProductNode(node, product);
-            this.nodePool.currentIndex++;
-            return node;
+        let cardElement = this.nodePool.pop();
+        
+        if (!cardElement) {
+            cardElement = document.createElement('div');
+            cardElement.className = 'product-card';
         }
         
-        // Crear nuevo nodo
-        const node = document.createElement('div');
-        node.className = 'product-card';
-        node.dataset.id = product.codigo;
+        const { product, score } = result;
         
-        this.updateProductNode(node, product);
-        return node;
-    }
-
-    updateProductNode(node, product) {
-        // Actualizar contenido del nodo
-        node.innerHTML = `
-            <div class="product-image">🛠️</div>
-            <div class="product-info">
+        // Plantilla ultra compacta y optimizada
+        cardElement.innerHTML = `
+            <div class="product-header">
                 <div class="product-code">${this.escapeHtml(product.codigo)}</div>
                 <div class="product-desc">${this.escapeHtml(product.descripcion)}</div>
-                <div class="product-meta">
-                    ${product.marca ? `<span class="product-brand">${this.escapeHtml(product.marca)}</span>` : ''}
-                    <span class="product-price">${this.formatPrice(product.precio_venta)}</span>
-                </div>
-                <div class="product-actions">
-                    <button class="btn btn-whatsapp" data-action="whatsapp" data-product='${this.escapeJson(product)}'>
-                        WhatsApp
-                    </button>
-                    <button class="btn btn-details" data-action="details" data-product='${this.escapeJson(product)}'>
-                        Detalles
-                    </button>
-                </div>
+            </div>
+            <div class="product-meta">
+                ${product.marca ? `<span class="product-brand">${this.escapeHtml(product.marca)}</span>` : ''}
+                <span class="product-price">${this.formatPrice(product.precio_venta)}</span>
+            </div>
+            ${product.rubro ? `<div class="product-rubro">${this.escapeHtml(product.rubro)}</div>` : ''}
+            <div class="product-actions">
+                <button class="btn-whatsapp" data-action="whatsapp" data-product='${this.escapeJson(product)}'>
+                    <span class="whatsapp-icon">💬</span>
+                    <span>Consultar</span>
+                </button>
             </div>
         `;
+        
+        return cardElement;
     }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    escapeJson(obj) {
-        return JSON.stringify(obj).replace(/"/g, '&quot;');
-    }
-
-    // ==============================================
-    // 6. MANEJO DE EVENTOS Y SCROLL
-    // ==============================================
 
     handleScroll() {
-        // Virtual scrolling optimizado con requestAnimationFrame
-        if (this.scrollRaf) return;
+        if (!this.state.hasMore || this.state.isLoading) return;
         
-        this.scrollRaf = requestAnimationFrame(() => {
-            const scrollTop = this.refs.productsViewport.scrollTop;
-            const scrollHeight = this.refs.productsViewport.scrollHeight;
-            const clientHeight = this.refs.productsViewport.clientHeight;
+        const viewport = this.refs.productsViewport;
+        const container = this.refs.productsContainer;
+        
+        if (!viewport || !container) return;
+        
+        const scrollBottom = viewport.scrollTop + viewport.clientHeight;
+        const containerBottom = container.scrollHeight;
+        
+        // Cargar más productos cuando esté cerca del final
+        if (scrollBottom >= containerBottom - 100) {
+            this.state.isLoading = true;
             
-            // Cargar más productos cuando esté cerca del final
-            if (scrollHeight - scrollTop - clientHeight < 200 && 
-                this.state.hasMore && 
-                !this.state.loading) {
-                this.loadMoreProducts();
+            // Mostrar loader
+            if (this.refs.scrollLoader) {
+                this.refs.scrollLoader.style.display = 'flex';
             }
             
-            this.scrollRaf = null;
-        });
-    }
-
-    loadMoreProducts() {
-        if (this.state.loading || !this.state.hasMore) return;
-        
-        this.state.loading = true;
-        requestAnimationFrame(() => {
-            this.renderNextBatch();
-            this.state.loading = false;
-        });
-    }
-
-    handleClick(e) {
-        const target = e.target;
-        
-        // Delegación de eventos para botones de productos
-        if (target.matches('[data-action]') || target.closest('[data-action]')) {
-            const button = target.matches('[data-action]') ? target : target.closest('[data-action]');
-            const action = button.dataset.action;
-            const product = JSON.parse(button.dataset.product.replace(/&quot;/g, '"'));
-            
-            if (action === 'whatsapp') {
-                this.openWhatsApp(product);
-            } else if (action === 'details') {
-                this.openProductModal(product);
-            }
-            e.stopPropagation();
+            // Usar requestAnimationFrame para no bloquear
+            requestAnimationFrame(() => {
+                this.renderProductBatch();
+                this.state.isLoading = false;
+            });
         }
     }
 
     // ==============================================
-    // 7. FUNCIONALIDADES PRINCIPALES
+    // 6. MANEJO DE EVENTOS Y UI
     // ==============================================
+
+    handleProductClick(event) {
+        const button = event.target.closest('[data-action]');
+        if (!button) return;
+        
+        event.stopPropagation();
+        
+        const action = button.dataset.action;
+        const productData = button.dataset.product;
+        
+        if (!productData) return;
+        
+        try {
+            const product = JSON.parse(productData.replace(/&quot;/g, '"'));
+            
+            switch (action) {
+                case 'whatsapp':
+                    this.openWhatsApp(product);
+                    break;
+                case 'details':
+                    this.showProductDetails(product);
+                    break;
+            }
+        } catch (error) {
+            console.error('Error procesando click:', error);
+        }
+    }
 
     openWhatsApp(product) {
         const message = `Hola, quiero consultar por:
@@ -620,49 +696,230 @@ Código: ${product.codigo}
 Precio: $${this.formatPrice(product.precio_venta)}`;
         
         const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+        
+        // Abrir en nueva pestaña
         window.open(url, '_blank', 'noopener,noreferrer');
+        
+        // Registrar estadística
+        this.stats.searchCount++;
     }
 
-    openProductModal(product) {
-        if (!this.refs.modal || !this.refs.modalContent) return;
+    showProductDetails(product) {
+        if (!this.refs.modalOverlay || !this.refs.modalBody) return;
         
-        const content = `
-            <h3>${this.escapeHtml(product.descripcion)}</h3>
-            <p><strong>Código:</strong> ${this.escapeHtml(product.codigo)}</p>
-            ${product.marca ? `<p><strong>Marca:</strong> ${this.escapeHtml(product.marca)}</p>` : ''}
-            ${product.rubro ? `<p><strong>Rubro:</strong> ${this.escapeHtml(product.rubro)}</p>` : ''}
-            <p class="modal-price"><strong>Precio:</strong> $${this.formatPrice(product.precio_venta)}</p>
-            <button class="btn btn-whatsapp" id="modalWhatsAppBtn">
-                Consultar por WhatsApp
-            </button>
+        // Actualizar contenido del modal
+        this.refs.modalBody.innerHTML = `
+            <div class="modal-product-info">
+                <p>
+                    <strong>Código:</strong>
+                    <span>${this.escapeHtml(product.codigo)}</span>
+                </p>
+                <p>
+                    <strong>Descripción:</strong>
+                    <span>${this.escapeHtml(product.descripcion)}</span>
+                </p>
+                ${product.marca ? `
+                <p>
+                    <strong>Marca:</strong>
+                    <span>${this.escapeHtml(product.marca)}</span>
+                </p>
+                ` : ''}
+                ${product.rubro ? `
+                <p>
+                    <strong>Rubro:</strong>
+                    <span>${this.escapeHtml(product.rubro)}</span>
+                </p>
+                ` : ''}
+                <div class="modal-price-large">
+                    ${this.formatPrice(product.precio_venta)}
+                </div>
+            </div>
         `;
         
-        this.refs.modalContent.innerHTML = content;
-        
-        // Agregar evento al botón del modal
-        const whatsappBtn = document.getElementById('modalWhatsAppBtn');
-        if (whatsappBtn) {
-            whatsappBtn.addEventListener('click', () => {
+        // Configurar botón de WhatsApp en el modal
+        if (this.refs.modalWhatsAppBtn) {
+            this.refs.modalWhatsAppBtn.onclick = () => {
                 this.openWhatsApp(product);
-                this.refs.modal.close();
-            });
+                this.hideModal();
+            };
         }
         
-        this.refs.modal.showModal();
+        // Mostrar modal
+        this.refs.modalOverlay.style.display = 'flex';
+        
+        // Prevenir scroll del body
+        document.body.style.overflow = 'hidden';
     }
 
-    formatPrice(price) {
-        if (isNaN(price)) return '0';
-        return new Intl.NumberFormat('es-AR').format(Math.round(price));
+    hideModal() {
+        if (this.refs.modalOverlay) {
+            this.refs.modalOverlay.style.display = 'none';
+        }
+        
+        // Restaurar scroll del body
+        document.body.style.overflow = '';
     }
+
+    // ==============================================
+    // 7. UTILIDADES Y HELPERS
+    // ==============================================
+
+    formatPrice(price) {
+        if (isNaN(price) || price === null || price === undefined) {
+            return '0';
+        }
+        
+        return new Intl.NumberFormat('es-AR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }).format(Math.round(price));
+    }
+
+    escapeHtml(text) {
+        if (!text) return '';
+        
+        const div = document.createElement('div');
+        div.textContent = String(text);
+        return div.innerHTML;
+    }
+
+    escapeJson(obj) {
+        return JSON.stringify(obj).replace(/"/g, '&quot;');
+    }
+
+    // ==============================================
+    // 8. GESTIÓN DE ESTADOS DE UI
+    // ==============================================
+
+    showEmptyState() {
+        this.hideAllStates();
+        if (this.refs.emptyState) {
+            this.refs.emptyState.style.display = 'block';
+        }
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.style.display = 'none';
+        }
+        this.updateProductCount();
+    }
+
+    showNoResultsState() {
+        this.hideAllStates();
+        if (this.refs.noResults) {
+            this.refs.noResults.style.display = 'block';
+        }
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.style.display = 'none';
+        }
+        if (this.refs.resultsInfo) {
+            this.refs.resultsInfo.style.display = 'none';
+        }
+        this.updateProductCount();
+    }
+
+    showLoadingState() {
+        this.hideAllStates();
+        if (this.refs.loadingState) {
+            this.refs.loadingState.style.display = 'block';
+        }
+    }
+
+    hideLoadingState() {
+        if (this.refs.loadingState) {
+            this.refs.loadingState.style.display = 'none';
+        }
+    }
+
+    hideAllStates() {
+        const states = ['emptyState', 'noResults', 'loadingState'];
+        states.forEach(state => {
+            if (this.refs[state]) {
+                this.refs[state].style.display = 'none';
+            }
+        });
+        
+        if (this.refs.resultsInfo) {
+            this.refs.resultsInfo.style.display = 'block';
+        }
+    }
+
+    showErrorState(message) {
+        this.hideAllStates();
+        
+        // Mostrar mensaje de error simple
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.innerHTML = `
+                <div style="grid-column: 1/-1; text-align: center; padding: 2rem;">
+                    <div style="font-size: 2rem; margin-bottom: 1rem;">⚠️</div>
+                    <h3 style="color: #c62828; margin-bottom: 0.5rem;">Error</h3>
+                    <p style="color: #666; margin-bottom: 1.5rem;">${this.escapeHtml(message)}</p>
+                    <button onclick="location.reload()" style="
+                        background: #2196f3;
+                        color: white;
+                        border: none;
+                        padding: 0.75rem 1.5rem;
+                        border-radius: 8px;
+                        font-weight: 600;
+                        cursor: pointer;
+                    ">Reintentar</button>
+                </div>
+            `;
+            this.refs.productsContainer.style.display = 'grid';
+        }
+    }
+
+    showFatalError(error) {
+        document.body.innerHTML = `
+            <div style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+                color: white;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 2rem;
+                text-align: center;
+            ">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🚨</div>
+                <h1 style="margin-bottom: 1rem; font-size: 1.5rem;">Error crítico</h1>
+                <p style="margin-bottom: 2rem; opacity: 0.9; max-width: 400px;">
+                    No se pudo iniciar el sistema. Por favor, recarga la página.
+                </p>
+                <button onclick="location.reload()" style="
+                    background: white;
+                    color: #1a237e;
+                    border: none;
+                    padding: 1rem 2rem;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    font-weight: bold;
+                    cursor: pointer;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                ">Reiniciar aplicación</button>
+                <p style="margin-top: 2rem; font-size: 0.8rem; opacity: 0.7;">
+                    Error: ${this.escapeHtml(error.message)}
+                </p>
+            </div>
+        `;
+    }
+
+    // ==============================================
+    // 9. ACTUALIZACIÓN DE UI Y ESTADÍSTICAS
+    // ==============================================
 
     updateProductCount() {
         if (!this.refs.productCount) return;
         
         const total = this.state.products.length;
-        const showing = this.state.filtered.length || (this.state.searchTerm ? 0 : total);
+        const showing = this.state.searchTerm || this.state.currentRubro 
+            ? this.state.results.length 
+            : Math.min(total, 10);
         
-        let text = `${total} productos disponibles`;
+        let text = `${total} productos`;
         
         if (this.state.searchTerm || this.state.currentRubro) {
             text = `${showing} de ${total} productos`;
@@ -671,147 +928,136 @@ Precio: $${this.formatPrice(product.precio_venta)}`;
         this.refs.productCount.textContent = text;
     }
 
-    updateRubroFilter() {
-        const rubros = Array.from(this.state.rubros).sort();
-        const select = this.refs.rubroFilter;
+    updateResultsInfo() {
+        if (!this.refs.resultsCount) return;
         
+        const showing = this.state.results.length;
+        const total = this.state.products.length;
+        
+        this.refs.resultsCount.textContent = `${showing} resultado${showing !== 1 ? 's' : ''}`;
+        
+        // Mostrar tiempo de búsqueda si es relevante
+        if (this.state.lastSearchTime > 0 && this.state.searchTerm) {
+            if (this.refs.searchTime) {
+                this.refs.searchTime.textContent = `en ${this.state.lastSearchTime}ms`;
+                this.refs.searchTime.style.display = 'inline';
+            }
+        }
+    }
+
+    updateSearchStats(searchTime, fromCache) {
+        this.state.lastSearchTime = Math.round(searchTime);
+        
+        // Actualizar estadísticas
+        this.stats.avgSearchTime = (this.stats.avgSearchTime * this.stats.searchCount + searchTime) / 
+                                  (this.stats.searchCount + 1);
+        this.stats.searchCount++;
+        
+        if (!fromCache) {
+            console.log(`🔍 Búsqueda: "${this.state.searchTerm}" - ${this.state.results.length} resultados en ${searchTime.toFixed(0)}ms`);
+        }
+    }
+
+    updateRubroFilter() {
+        const select = this.refs.rubroFilter;
         if (!select) return;
+        
+        // Ordenar rubros alfabéticamente
+        const rubros = Array.from(this.state.rubros)
+            .filter(rubro => rubro && rubro.trim())
+            .sort((a, b) => a.localeCompare(b));
         
         // Limpiar opciones existentes (excepto la primera)
         while (select.options.length > 1) {
             select.remove(1);
         }
         
-        // Agregar opciones de rubro
+        // Agregar rubros
         rubros.forEach(rubro => {
-            if (rubro && rubro.trim()) {
-                const option = document.createElement('option');
-                option.value = rubro;
-                option.textContent = rubro;
-                select.appendChild(option);
-            }
+            const option = document.createElement('option');
+            option.value = rubro;
+            option.textContent = rubro;
+            select.appendChild(option);
         });
     }
 
+    updateLastUpdateDate() {
+        if (!this.refs.lastUpdate) return;
+        
+        const now = new Date();
+        const options = { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        };
+        
+        const dateString = now.toLocaleDateString('es-AR', options);
+        this.refs.lastUpdate.textContent = `Última actualización: ${dateString}`;
+    }
+
     // ==============================================
-    // 8. ESTADOS DE UI Y MANEJO DE ERRORES
+    // 10. FUNCIONES DE CONTROL
     // ==============================================
 
-    showLoading() {
-        if (this.refs.loadingIndicator) {
-            this.refs.loadingIndicator.classList.add('active');
-        }
-        if (this.refs.productsContainer) {
-            this.refs.productsContainer.style.display = 'none';
-        }
-        this.hideOtherStates();
-    }
-
-    hideLoading() {
-        if (this.refs.loadingIndicator) {
-            this.refs.loadingIndicator.classList.remove('active');
-        }
-    }
-
-    showEmptyState() {
-        if (this.refs.emptyState) {
-            this.refs.emptyState.classList.add('active');
-        }
-        if (this.refs.productsContainer) {
-            this.refs.productsContainer.style.display = 'none';
-        }
-        this.hideOtherStates();
-        this.updateProductCount();
-    }
-
-    showNoResults() {
-        if (this.refs.noResults) {
-            this.refs.noResults.classList.add('active');
-        }
-        if (this.refs.productsContainer) {
-            this.refs.productsContainer.style.display = 'none';
-        }
-        this.hideOtherStates();
-        this.updateProductCount();
-    }
-
-    hideOtherStates() {
-        if (this.refs.emptyState) {
-            this.refs.emptyState.classList.remove('active');
-        }
-        if (this.refs.noResults) {
-            this.refs.noResults.classList.remove('active');
-        }
-        if (this.refs.loadingIndicator) {
-            this.refs.loadingIndicator.classList.remove('active');
-        }
-    }
-
-    showError() {
-        if (this.refs.productCount) {
-            this.refs.productCount.textContent = 'Error cargando productos';
-        }
-        this.hideLoading();
+    clearSearch() {
+        this.state.searchTerm = '';
+        this.state.currentRubro = '';
+        this.state.results = [];
         
-        // Mostrar mensaje de error
-        if (this.refs.productsContainer) {
-            this.refs.productsContainer.innerHTML = `
-                <div class="error-state">
-                    <p>⚠️ Error al cargar los productos</p>
-                    <button onclick="location.reload()" class="btn">Reintentar</button>
-                </div>
-            `;
-            this.refs.productsContainer.style.display = 'block';
+        if (this.refs.searchInput) {
+            this.refs.searchInput.value = '';
+        }
+        
+        if (this.refs.rubroFilter) {
+            this.refs.rubroFilter.value = '';
+        }
+        
+        if (this.refs.clearBtn) {
+            this.refs.clearBtn.style.display = 'none';
+        }
+        
+        if (this.refs.searchTime) {
+            this.refs.searchTime.style.display = 'none';
+        }
+        
+        this.showEmptyState();
+    }
+
+    resetSearch() {
+        this.clearSearch();
+        this.showEmptyState();
+    }
+
+    sortResults(sortType) {
+        if (this.state.results.length === 0) return;
+        
+        switch (sortType) {
+            case 'price_asc':
+                this.state.results.sort((a, b) => a.product.precio_venta - b.product.precio_venta);
+                break;
+            case 'price_desc':
+                this.state.results.sort((a, b) => b.product.precio_venta - a.product.precio_venta);
+                break;
+            case 'relevance':
+            default:
+                this.state.results.sort((a, b) => b.score - a.score);
+                break;
         }
     }
 
-    setupInitialState() {
-        // Pre-cache de nodos para reutilización
-        this.prefillNodePool();
-        
-        // Ajustar altura del viewport para mobile
-        this.setViewportHeight();
-        
-        // Configurar resize listener (debounced)
-        window.addEventListener('resize', this.debounce(() => {
-            this.setViewportHeight();
-        }, 250));
-        
-        // Cargar primeros productos si no hay búsqueda
-        if (!this.state.searchTerm && this.state.products.length > 0) {
-            this.state.filtered = this.state.products.slice(0, this.CONFIG.BATCH_SIZE);
-            this.state.hasMore = this.state.products.length > this.CONFIG.BATCH_SIZE;
-            this.renderResults();
-        }
-    }
-
-    prefillNodePool() {
-        // Crear algunos nodos por adelantado para reutilizar
+    setupInitialUI() {
+        // Precargar nodos para el pool
         for (let i = 0; i < 10; i++) {
             const node = document.createElement('div');
             node.className = 'product-card';
-            this.nodePool.cards.push(node);
+            this.nodePool.push(node);
         }
-    }
-
-    setViewportHeight() {
-        // Ajustar altura para mobile (evitar problemas con viewport en iOS)
-        const vh = window.innerHeight * 0.01;
-        document.documentElement.style.setProperty('--vh', `${vh}px`);
         
-        // Calcular altura del viewport de productos
-        const header = document.querySelector('.app-header');
-        const searchSection = document.querySelector('.search-section');
-        const footer = document.querySelector('.app-footer');
-        
-        if (header && searchSection && this.refs.productsViewport) {
-            const headerHeight = header.offsetHeight;
-            const searchHeight = searchSection.offsetHeight;
-            const footerHeight = footer ? footer.offsetHeight : 0;
-            
-            const viewportHeight = window.innerHeight - headerHeight - searchHeight - footerHeight;
-            this.refs.productsViewport.style.height = `${viewportHeight}px`;
-        }
+        // Mostrar estado inicial
+        this.showEmptyState();
     }
 }
 
@@ -819,14 +1065,14 @@ Precio: $${this.formatPrice(product.precio_venta)}`;
 // INICIALIZACIÓN DE LA APLICACIÓN
 // ==============================================
 
-// Polyfill para requestIdleCallback en navegadores que no lo soportan
+// Polyfill para navegadores antiguos
 if (!window.requestIdleCallback) {
     window.requestIdleCallback = function(callback) {
         return setTimeout(() => {
             callback({
                 didTimeout: false,
                 timeRemaining: function() {
-                    return 50;
+                    return 15;
                 }
             });
         }, 1);
@@ -839,22 +1085,54 @@ if (!window.cancelIdleCallback) {
     };
 }
 
-// Iniciar aplicación cuando el DOM esté listo
-let app;
+// Inicializar cuando el DOM esté listo
+let ferreteriaApp;
 
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        app = new OptimizedProductSearch();
-        window.app = app; // Exponer para debugging
+        ferreteriaApp = new FerreteriaSearchSystem();
+        window.ferreteriaApp = ferreteriaApp; // Para debugging
     } catch (error) {
-        console.error('Error inicializando la aplicación:', error);
+        console.error('Error fatal inicializando:', error);
+        
+        // Mostrar error crítico
         document.body.innerHTML = `
-            <div style="padding: 20px; text-align: center;">
-                <h2>⚠️ Error en la aplicación</h2>
-                <p>${error.message}</p>
-                <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 20px;">
-                    Recargar página
+            <div style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: #f44336;
+                color: white;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 2rem;
+                text-align: center;
+                font-family: sans-serif;
+            ">
+                <h1 style="font-size: 2rem; margin-bottom: 1rem;">🚨 Error Crítico</h1>
+                <p style="margin-bottom: 2rem; font-size: 1.1rem;">
+                    No se pudo cargar el sistema. Por favor, contacta al administrador.
+                </p>
+                <button onclick="location.reload()" style="
+                    background: white;
+                    color: #f44336;
+                    border: none;
+                    padding: 1rem 2rem;
+                    font-size: 1rem;
+                    font-weight: bold;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    margin-bottom: 1rem;
+                ">
+                    Reintentar
                 </button>
+                <p style="font-size: 0.8rem; opacity: 0.8; max-width: 500px;">
+                    Si el problema persiste, verifica que el archivo products.json esté en la misma carpeta.
+                </p>
             </div>
         `;
     }
@@ -863,8 +1141,26 @@ document.addEventListener('DOMContentLoaded', () => {
 // Service Worker para cache (opcional)
 if ('serviceWorker' in navigator && window.location.hostname !== 'localhost') {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(err => {
-            console.log('ServiceWorker registration failed:', err);
-        });
+        navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+                console.log('ServiceWorker registrado:', registration.scope);
+            })
+            .catch(error => {
+                console.log('ServiceWorker no registrado:', error);
+            });
     });
 }
+
+// Manejar conexión offline
+window.addEventListener('offline', () => {
+    if (ferreteriaApp && ferreteriaApp.showErrorState) {
+        ferreteriaApp.showErrorState('Sin conexión a internet. Los datos pueden no estar actualizados.');
+    }
+});
+
+window.addEventListener('online', () => {
+    if (ferreteriaApp && ferreteriaApp.refs && ferreteriaApp.refs.productsContainer) {
+        ferreteriaApp.refs.productsContainer.innerHTML = '';
+        ferreteriaApp.showEmptyState();
+    }
+});
