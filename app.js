@@ -73,42 +73,74 @@ class OptimizedProductSearch {
             clearBtn: document.getElementById('clearBtn'),
             resetSearch: document.getElementById('resetSearch'),
             modal: document.getElementById('productModal'),
-            closeModal: document.getElementById('closeModal')
+            closeModal: document.getElementById('closeModal'),
+            modalContent: document.getElementById('modalContent')
         };
     }
 
     setupEventDelegation() {
-        // Un solo listener para todos los eventos
-        document.addEventListener('input', this.debounce(this.handleSearch.bind(this), this.CONFIG.DEBOUNCE_MS));
-        document.addEventListener('change', this.handleFilterChange.bind(this));
+        // Eventos de búsqueda con debounce
+        this.refs.searchInput?.addEventListener('input', 
+            this.debounce(this.handleSearch.bind(this), this.CONFIG.DEBOUNCE_MS)
+        );
+        
+        // Eventos de cambio en filtros
+        this.refs.rubroFilter?.addEventListener('change', this.handleFilterChange.bind(this));
+        this.refs.sortFilter?.addEventListener('change', this.handleFilterChange.bind(this));
+        
+        // Eventos de clic
         document.addEventListener('click', this.handleClick.bind(this));
         
-        // Eventos táctiles optimizados
-        this.refs.productsViewport.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
+        // Eventos de scroll (passive para mejor performance)
+        this.refs.productsViewport?.addEventListener('scroll', 
+            this.handleScroll.bind(this), 
+            { passive: true }
+        );
         
         // Eventos del modal
-        this.refs.closeModal?.addEventListener('click', () => this.refs.modal.close());
+        this.refs.closeModal?.addEventListener('click', () => this.refs.modal?.close());
         this.refs.modal?.addEventListener('click', (e) => {
             if (e.target === this.refs.modal) this.refs.modal.close();
+        });
+        
+        // Eventos de botones
+        this.refs.clearBtn?.addEventListener('click', () => {
+            this.refs.searchInput.value = '';
+            this.refs.clearBtn.style.display = 'none';
+            this.state.searchTerm = '';
+            this.showEmptyState();
+        });
+        
+        this.refs.resetSearch?.addEventListener('click', () => {
+            this.refs.searchInput.value = '';
+            this.state.searchTerm = '';
+            this.state.filtered = [];
+            this.showEmptyState();
         });
     }
 
     setupIntersectionObserver() {
         // Observer para lazy loading de productos
-        this.observer = new IntersectionObserver(
-            (entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting && this.state.hasMore) {
-                        this.loadMoreProducts();
-                    }
-                });
-            },
-            { root: this.refs.productsViewport, threshold: 0.1 }
-        );
+        if ('IntersectionObserver' in window) {
+            this.observer = new IntersectionObserver(
+                (entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting && this.state.hasMore && !this.state.loading) {
+                            this.loadMoreProducts();
+                        }
+                    });
+                },
+                { 
+                    root: this.refs.productsViewport, 
+                    rootMargin: '50px',
+                    threshold: 0.1 
+                }
+            );
+        }
     }
 
     // ==============================================
-    // 2. CARGA DE DATOS EFICIENTE
+    // 2. CARGA DE DATOS EFICIENTE (CORREGIDO)
     // ==============================================
 
     async loadData() {
@@ -128,6 +160,11 @@ class OptimizedProductSearch {
             
             // Procesamiento en lotes para no bloquear UI
             await this.processDataInBatches(data);
+            
+            // Construir índice de búsqueda DESPUÉS de procesar todos los datos
+            this.buildSearchIndex();
+            this.updateRubroFilter();
+            this.updateProductCount();
             
             this.hideLoading();
             this.showEmptyState();
@@ -150,34 +187,41 @@ class OptimizedProductSearch {
             // Procesar batch sin bloquear
             await this.processBatch(batch);
             
-            // Liberar control al event loop
-            if (i % 5 === 0) await this.yieldToMainThread();
+            // Liberar control al event loop cada 5 batches
+            if (i % 5 === 0) {
+                await this.yieldToMainThread();
+            }
         }
-        
-        // Construir índice después de procesar todo
-        this.buildSearchIndex();
-        this.updateRubroFilter();
-        this.updateProductCount();
     }
 
     async processBatch(batch) {
         return new Promise(resolve => {
-            requestIdleCallback(() => {
-                batch.forEach(product => {
-                    // Normalización y almacenamiento eficiente
-                    const normalized = this.normalizeProduct(product);
-                    this.state.products.push(normalized);
-                    
-                    // Indexar para búsqueda rápida
-                    this.indexProduct(normalized);
-                    
-                    // Agrupar rubros
-                    if (normalized.rubro) {
-                        this.state.rubros.add(normalized.rubro);
-                    }
+            // Usar requestIdleCallback o setTimeout para no bloquear
+            if ('requestIdleCallback' in window) {
+                requestIdleCallback(() => {
+                    this.processBatchSync(batch);
+                    resolve();
                 });
-                resolve();
-            });
+            } else {
+                // Fallback para navegadores que no soportan requestIdleCallback
+                setTimeout(() => {
+                    this.processBatchSync(batch);
+                    resolve();
+                }, 0);
+            }
+        });
+    }
+
+    processBatchSync(batch) {
+        batch.forEach(product => {
+            // Normalización y almacenamiento eficiente
+            const normalized = this.normalizeProduct(product);
+            this.state.products.push(normalized);
+            
+            // Agrupar rubros (esto es síncrono y rápido)
+            if (normalized.rubro) {
+                this.state.rubros.add(normalized.rubro);
+            }
         });
     }
 
@@ -185,8 +229,21 @@ class OptimizedProductSearch {
         return new Promise(resolve => setTimeout(resolve, 0));
     }
 
+    normalizeProduct(product) {
+        return {
+            codigo: String(product.codigo || '').trim(),
+            descripcion: String(product.descripcion || '').trim(),
+            rubro: String(product.rubro || '').trim(),
+            marca: String(product.marca || '').trim(),
+            precio_venta: Number(product.precio_venta) || 0,
+            searchable: this.normalizeString(
+                `${product.descripcion} ${product.codigo} ${product.marca} ${product.rubro}`
+            )
+        };
+    }
+
     // ==============================================
-    // 3. INDEXACIÓN Y BÚSQUEDA ÓPTIMA
+    // 3. INDEXACIÓN Y BÚSQUEDA ÓPTIMA (CORREGIDO)
     // ==============================================
 
     buildSearchIndex() {
@@ -217,7 +274,7 @@ class OptimizedProductSearch {
         ];
         
         fields.forEach(field => {
-            if (field) {
+            if (field && field.length > 0) {
                 const normalized = this.normalizeString(field);
                 const words = normalized.split(/\s+/);
                 words.forEach(word => {
@@ -235,20 +292,8 @@ class OptimizedProductSearch {
         return Array.from(tokens);
     }
 
-    normalizeProduct(product) {
-        return {
-            codigo: String(product.codigo || '').trim(),
-            descripcion: String(product.descripcion || '').trim(),
-            rubro: String(product.rubro || '').trim(),
-            marca: String(product.marca || '').trim(),
-            precio_venta: Number(product.precio_venta) || 0,
-            searchable: this.normalizeString(
-                `${product.descripcion} ${product.codigo} ${product.marca} ${product.rubro}`
-            )
-        };
-    }
-
     normalizeString(str) {
+        if (!str) return '';
         return str
             .toLowerCase()
             .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove accents
@@ -273,31 +318,22 @@ class OptimizedProductSearch {
         };
     }
 
-    async handleSearch(e) {
-        if (e.target !== this.refs.searchInput) return;
-        
+    handleSearch(e) {
         const searchTerm = e.target.value.trim();
         this.state.searchTerm = searchTerm;
         
-        // Limpiar si está vacío
+        // Mostrar/ocultar botón clear
+        if (this.refs.clearBtn) {
+            this.refs.clearBtn.style.display = searchTerm ? 'block' : 'none';
+        }
+        
+        // Si está vacío, mostrar estado inicial
         if (!searchTerm) {
-            this.refs.clearBtn.style.display = 'none';
             this.showEmptyState();
             return;
         }
         
-        this.refs.clearBtn.style.display = 'block';
-        
-        // Verificar cache primero
-        const cacheKey = `${searchTerm}-${this.state.currentRubro}-${this.state.sortBy}`;
-        
-        if (this.searchCache.has(cacheKey)) {
-            this.state.filtered = this.searchCache.get(cacheKey);
-            this.renderResults();
-            return;
-        }
-        
-        // Búsqueda optimizada con índice
+        // Realizar búsqueda
         this.performSearch(searchTerm);
     }
 
@@ -311,7 +347,16 @@ class OptimizedProductSearch {
             return;
         }
         
-        // Buscar en índice
+        // Verificar cache primero
+        const cacheKey = `${searchTerm}-${this.state.currentRubro}-${this.state.sortBy}`;
+        
+        if (this.searchCache.has(cacheKey)) {
+            this.state.filtered = this.searchCache.get(cacheKey);
+            this.renderResults();
+            return;
+        }
+        
+        // Buscar en índice invertido
         let resultIndices = new Set();
         
         searchWords.forEach((word, index) => {
@@ -341,23 +386,63 @@ class OptimizedProductSearch {
         // Ordenar resultados
         this.sortResults();
         
-        // Cachear resultados
+        // Cachear resultados (LRU cache)
         if (this.searchCache.size >= this.CONFIG.CACHE_SIZE) {
             const firstKey = this.searchCache.keys().next().value;
             this.searchCache.delete(firstKey);
         }
-        this.searchCache.set(cacheKey, this.state.filtered);
+        this.searchCache.set(cacheKey, [...this.state.filtered]);
         
-        // Renderizar
+        // Renderizar resultados
         this.renderResults();
     }
 
+    handleFilterChange() {
+        this.state.currentRubro = this.refs.rubroFilter?.value || '';
+        this.state.sortBy = this.refs.sortFilter?.value || 'relevance';
+        
+        // Si hay término de búsqueda, re-buscar con nuevos filtros
+        if (this.state.searchTerm) {
+            this.performSearch(this.state.searchTerm);
+        } else if (this.state.currentRubro) {
+            // Filtrar por rubro sin búsqueda
+            this.state.filtered = this.state.products.filter(product => {
+                if (this.state.currentRubro && product.rubro !== this.state.currentRubro) {
+                    return false;
+                }
+                return true;
+            });
+            this.sortResults();
+            this.renderResults();
+        } else {
+            // Sin filtros ni búsqueda, mostrar estado inicial
+            this.showEmptyState();
+        }
+    }
+
+    sortResults() {
+        const { filtered, sortBy } = this.state;
+        
+        filtered.sort((a, b) => {
+            switch (sortBy) {
+                case 'price_asc':
+                    return a.precio_venta - b.precio_venta;
+                case 'price_desc':
+                    return b.precio_venta - a.precio_venta;
+                case 'relevance':
+                default:
+                    // Mantener orden de relevancia (score de búsqueda)
+                    return 0;
+            }
+        });
+    }
+
     // ==============================================
-    // 5. RENDERIZADO VIRTUALIZADO
+    // 5. RENDERIZADO VIRTUALIZADO Y OPTIMIZADO
     // ==============================================
 
     renderResults() {
-        // Resetear offset
+        // Resetear offset y estado
         this.state.offset = 0;
         this.state.hasMore = this.state.filtered.length > this.CONFIG.BATCH_SIZE;
         
@@ -369,6 +454,11 @@ class OptimizedProductSearch {
             return;
         }
         
+        // Ocultar estados vacíos
+        this.refs.emptyState?.classList.remove('active');
+        this.refs.noResults?.classList.remove('active');
+        this.refs.productsContainer.style.display = 'grid';
+        
         // Renderizar primer lote
         this.renderNextBatch();
         
@@ -377,17 +467,17 @@ class OptimizedProductSearch {
     }
 
     clearContainer() {
-        // Reutilizar nodos en lugar de recrearlos
         const container = this.refs.productsContainer;
+        if (!container) return;
         
-        // Mover nodos al pool
+        // Mover nodos existentes al pool para reutilizar
         while (container.firstChild) {
             const node = container.firstChild;
             container.removeChild(node);
             this.nodePool.cards.push(node);
         }
         
-        // Resetear pool index
+        // Resetear índice del pool
         this.nodePool.currentIndex = 0;
     }
 
@@ -411,9 +501,8 @@ class OptimizedProductSearch {
         this.state.hasMore = end < this.state.filtered.length;
         
         // Observar último elemento para infinite scroll
-        if (this.state.hasMore) {
-            const lastChild = this.refs.productsContainer.lastChild;
-            this.observer.observe(lastChild);
+        if (this.state.hasMore && this.observer && this.refs.productsContainer.lastChild) {
+            this.observer.observe(this.refs.productsContainer.lastChild);
         }
     }
 
@@ -436,21 +525,21 @@ class OptimizedProductSearch {
     }
 
     updateProductNode(node, product) {
-        // Actualizar solo lo necesario
+        // Actualizar contenido del nodo
         node.innerHTML = `
             <div class="product-image">🛠️</div>
             <div class="product-info">
-                <div class="product-code">${product.codigo}</div>
-                <div class="product-desc">${product.descripcion}</div>
+                <div class="product-code">${this.escapeHtml(product.codigo)}</div>
+                <div class="product-desc">${this.escapeHtml(product.descripcion)}</div>
                 <div class="product-meta">
-                    ${product.marca ? `<span class="product-brand">${product.marca}</span>` : ''}
+                    ${product.marca ? `<span class="product-brand">${this.escapeHtml(product.marca)}</span>` : ''}
                     <span class="product-price">${this.formatPrice(product.precio_venta)}</span>
                 </div>
                 <div class="product-actions">
-                    <button class="btn btn-whatsapp" data-action="whatsapp" data-product='${JSON.stringify(product)}'>
+                    <button class="btn btn-whatsapp" data-action="whatsapp" data-product='${this.escapeJson(product)}'>
                         WhatsApp
                     </button>
-                    <button class="btn btn-details" data-action="details" data-product='${JSON.stringify(product)}'>
+                    <button class="btn btn-details" data-action="details" data-product='${this.escapeJson(product)}'>
                         Detalles
                     </button>
                 </div>
@@ -458,71 +547,39 @@ class OptimizedProductSearch {
         `;
     }
 
-    // ==============================================
-    // 6. MANEJO DE EVENTOS OPTIMIZADO
-    // ==============================================
-
-    handleFilterChange(e) {
-        if (e.target === this.refs.rubroFilter) {
-            this.state.currentRubro = e.target.value;
-        } else if (e.target === this.refs.sortFilter) {
-            this.state.sortBy = e.target.value;
-        }
-        
-        // Re-buscar con nuevos filtros
-        if (this.state.searchTerm) {
-            this.performSearch(this.state.searchTerm);
-        }
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
-    handleClick(e) {
-        const target = e.target;
-        
-        // Delegación de eventos para botones
-        if (target.matches('[data-action]')) {
-            const action = target.dataset.action;
-            const product = JSON.parse(target.dataset.product);
-            
-            if (action === 'whatsapp') {
-                this.openWhatsApp(product);
-            } else if (action === 'details') {
-                this.openProductModal(product);
-            }
-        }
-        
-        // Botón clear
-        if (target === this.refs.clearBtn) {
-            this.refs.searchInput.value = '';
-            this.refs.clearBtn.style.display = 'none';
-            this.state.searchTerm = '';
-            this.showEmptyState();
-        }
-        
-        // Botón reset search
-        if (target === this.refs.resetSearch) {
-            this.refs.searchInput.value = '';
-            this.state.searchTerm = '';
-            this.state.filtered = [];
-            this.showEmptyState();
-        }
+    escapeJson(obj) {
+        return JSON.stringify(obj).replace(/"/g, '&quot;');
     }
+
+    // ==============================================
+    // 6. MANEJO DE EVENTOS Y SCROLL
+    // ==============================================
 
     handleScroll() {
-        // Virtual scrolling simple
-        requestAnimationFrame(() => {
+        // Virtual scrolling optimizado con requestAnimationFrame
+        if (this.scrollRaf) return;
+        
+        this.scrollRaf = requestAnimationFrame(() => {
             const scrollTop = this.refs.productsViewport.scrollTop;
             const scrollHeight = this.refs.productsViewport.scrollHeight;
             const clientHeight = this.refs.productsViewport.clientHeight;
             
-            if (scrollHeight - scrollTop - clientHeight < 100 && this.state.hasMore) {
+            // Cargar más productos cuando esté cerca del final
+            if (scrollHeight - scrollTop - clientHeight < 200 && 
+                this.state.hasMore && 
+                !this.state.loading) {
                 this.loadMoreProducts();
             }
+            
+            this.scrollRaf = null;
         });
     }
-
-    // ==============================================
-    // 7. FUNCIONALIDADES AUXILIARES
-    // ==============================================
 
     loadMoreProducts() {
         if (this.state.loading || !this.state.hasMore) return;
@@ -534,22 +591,27 @@ class OptimizedProductSearch {
         });
     }
 
-    sortResults() {
-        const { filtered, sortBy } = this.state;
+    handleClick(e) {
+        const target = e.target;
         
-        filtered.sort((a, b) => {
-            switch (sortBy) {
-                case 'price_asc':
-                    return a.precio_venta - b.precio_venta;
-                case 'price_desc':
-                    return b.precio_venta - a.precio_venta;
-                case 'relevance':
-                default:
-                    // Mantener orden de relevancia (ya está ordenado por la búsqueda)
-                    return 0;
+        // Delegación de eventos para botones de productos
+        if (target.matches('[data-action]') || target.closest('[data-action]')) {
+            const button = target.matches('[data-action]') ? target : target.closest('[data-action]');
+            const action = button.dataset.action;
+            const product = JSON.parse(button.dataset.product.replace(/&quot;/g, '"'));
+            
+            if (action === 'whatsapp') {
+                this.openWhatsApp(product);
+            } else if (action === 'details') {
+                this.openProductModal(product);
             }
-        });
+            e.stopPropagation();
+        }
     }
+
+    // ==============================================
+    // 7. FUNCIONALIDADES PRINCIPALES
+    // ==============================================
 
     openWhatsApp(product) {
         const message = `Hola, quiero consultar por:
@@ -558,101 +620,165 @@ Código: ${product.codigo}
 Precio: $${this.formatPrice(product.precio_venta)}`;
         
         const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-        window.open(url, '_blank');
+        window.open(url, '_blank', 'noopener,noreferrer');
     }
 
     openProductModal(product) {
+        if (!this.refs.modal || !this.refs.modalContent) return;
+        
         const content = `
-            <h3>${product.descripcion}</h3>
-            <p><strong>Código:</strong> ${product.codigo}</p>
-            ${product.marca ? `<p><strong>Marca:</strong> ${product.marca}</p>` : ''}
-            ${product.rubro ? `<p><strong>Rubro:</strong> ${product.rubro}</p>` : ''}
+            <h3>${this.escapeHtml(product.descripcion)}</h3>
+            <p><strong>Código:</strong> ${this.escapeHtml(product.codigo)}</p>
+            ${product.marca ? `<p><strong>Marca:</strong> ${this.escapeHtml(product.marca)}</p>` : ''}
+            ${product.rubro ? `<p><strong>Rubro:</strong> ${this.escapeHtml(product.rubro)}</p>` : ''}
             <p class="modal-price"><strong>Precio:</strong> $${this.formatPrice(product.precio_venta)}</p>
-            <button class="btn btn-whatsapp" onclick="app.openWhatsApp(${JSON.stringify(product)})">
+            <button class="btn btn-whatsapp" id="modalWhatsAppBtn">
                 Consultar por WhatsApp
             </button>
         `;
         
         this.refs.modalContent.innerHTML = content;
+        
+        // Agregar evento al botón del modal
+        const whatsappBtn = document.getElementById('modalWhatsAppBtn');
+        if (whatsappBtn) {
+            whatsappBtn.addEventListener('click', () => {
+                this.openWhatsApp(product);
+                this.refs.modal.close();
+            });
+        }
+        
         this.refs.modal.showModal();
     }
 
     formatPrice(price) {
-        return new Intl.NumberFormat('es-AR').format(price);
+        if (isNaN(price)) return '0';
+        return new Intl.NumberFormat('es-AR').format(Math.round(price));
     }
 
     updateProductCount() {
-        const total = this.state.products.length;
-        const showing = this.state.filtered.length || total;
+        if (!this.refs.productCount) return;
         
-        this.refs.productCount.textContent = 
-            this.state.searchTerm || this.state.currentRubro
-                ? `${showing} de ${total} productos`
-                : `${total} productos disponibles`;
+        const total = this.state.products.length;
+        const showing = this.state.filtered.length || (this.state.searchTerm ? 0 : total);
+        
+        let text = `${total} productos disponibles`;
+        
+        if (this.state.searchTerm || this.state.currentRubro) {
+            text = `${showing} de ${total} productos`;
+        }
+        
+        this.refs.productCount.textContent = text;
     }
 
     updateRubroFilter() {
         const rubros = Array.from(this.state.rubros).sort();
         const select = this.refs.rubroFilter;
         
+        if (!select) return;
+        
         // Limpiar opciones existentes (excepto la primera)
         while (select.options.length > 1) {
             select.remove(1);
         }
         
-        // Agregar opciones
+        // Agregar opciones de rubro
         rubros.forEach(rubro => {
-            const option = document.createElement('option');
-            option.value = rubro;
-            option.textContent = rubro;
-            select.appendChild(option);
+            if (rubro && rubro.trim()) {
+                const option = document.createElement('option');
+                option.value = rubro;
+                option.textContent = rubro;
+                select.appendChild(option);
+            }
         });
     }
 
     // ==============================================
-    // 8. ESTADOS DE UI OPTIMIZADOS
+    // 8. ESTADOS DE UI Y MANEJO DE ERRORES
     // ==============================================
 
     showLoading() {
-        this.refs.loadingIndicator?.classList.add('active');
-        this.refs.emptyState?.classList.remove('active');
-        this.refs.noResults?.classList.remove('active');
-        this.refs.productsContainer.style.display = 'none';
+        if (this.refs.loadingIndicator) {
+            this.refs.loadingIndicator.classList.add('active');
+        }
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.style.display = 'none';
+        }
+        this.hideOtherStates();
     }
 
     hideLoading() {
-        this.refs.loadingIndicator?.classList.remove('active');
+        if (this.refs.loadingIndicator) {
+            this.refs.loadingIndicator.classList.remove('active');
+        }
     }
 
     showEmptyState() {
-        this.refs.emptyState?.classList.add('active');
-        this.refs.noResults?.classList.remove('active');
-        this.refs.productsContainer.style.display = 'none';
-        this.state.filtered = [];
-        this.clearContainer();
+        if (this.refs.emptyState) {
+            this.refs.emptyState.classList.add('active');
+        }
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.style.display = 'none';
+        }
+        this.hideOtherStates();
         this.updateProductCount();
     }
 
     showNoResults() {
-        this.refs.noResults?.classList.add('active');
-        this.refs.emptyState?.classList.remove('active');
-        this.refs.productsContainer.style.display = 'none';
+        if (this.refs.noResults) {
+            this.refs.noResults.classList.add('active');
+        }
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.style.display = 'none';
+        }
+        this.hideOtherStates();
+        this.updateProductCount();
+    }
+
+    hideOtherStates() {
+        if (this.refs.emptyState) {
+            this.refs.emptyState.classList.remove('active');
+        }
+        if (this.refs.noResults) {
+            this.refs.noResults.classList.remove('active');
+        }
+        if (this.refs.loadingIndicator) {
+            this.refs.loadingIndicator.classList.remove('active');
+        }
     }
 
     showError() {
-        this.refs.productCount.textContent = 'Error cargando productos';
-        this.refs.loadingIndicator.classList.remove('active');
+        if (this.refs.productCount) {
+            this.refs.productCount.textContent = 'Error cargando productos';
+        }
+        this.hideLoading();
+        
+        // Mostrar mensaje de error
+        if (this.refs.productsContainer) {
+            this.refs.productsContainer.innerHTML = `
+                <div class="error-state">
+                    <p>⚠️ Error al cargar los productos</p>
+                    <button onclick="location.reload()" class="btn">Reintentar</button>
+                </div>
+            `;
+            this.refs.productsContainer.style.display = 'block';
+        }
     }
 
     setupInitialState() {
-        // Pre-cache de nodos
+        // Pre-cache de nodos para reutilización
         this.prefillNodePool();
         
-        // Establecer altura del viewport
+        // Ajustar altura del viewport para mobile
         this.setViewportHeight();
         
+        // Configurar resize listener (debounced)
+        window.addEventListener('resize', this.debounce(() => {
+            this.setViewportHeight();
+        }, 250));
+        
         // Cargar primeros productos si no hay búsqueda
-        if (!this.state.searchTerm) {
+        if (!this.state.searchTerm && this.state.products.length > 0) {
             this.state.filtered = this.state.products.slice(0, this.CONFIG.BATCH_SIZE);
             this.state.hasMore = this.state.products.length > this.CONFIG.BATCH_SIZE;
             this.renderResults();
@@ -660,7 +786,7 @@ Precio: $${this.formatPrice(product.precio_venta)}`;
     }
 
     prefillNodePool() {
-        // Crear algunos nodos por adelantado
+        // Crear algunos nodos por adelantado para reutilizar
         for (let i = 0; i < 10; i++) {
             const node = document.createElement('div');
             node.className = 'product-card';
@@ -669,34 +795,76 @@ Precio: $${this.formatPrice(product.precio_venta)}`;
     }
 
     setViewportHeight() {
-        // Ajustar altura para mobile
+        // Ajustar altura para mobile (evitar problemas con viewport en iOS)
         const vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--vh', `${vh}px`);
         
-        this.refs.productsViewport.style.height = 
-            `calc(var(--vh, 1vh) * 100 - ${this.refs.appHeader?.offsetHeight + this.refs.searchSection?.offsetHeight}px)`;
+        // Calcular altura del viewport de productos
+        const header = document.querySelector('.app-header');
+        const searchSection = document.querySelector('.search-section');
+        const footer = document.querySelector('.app-footer');
+        
+        if (header && searchSection && this.refs.productsViewport) {
+            const headerHeight = header.offsetHeight;
+            const searchHeight = searchSection.offsetHeight;
+            const footerHeight = footer ? footer.offsetHeight : 0;
+            
+            const viewportHeight = window.innerHeight - headerHeight - searchHeight - footerHeight;
+            this.refs.productsViewport.style.height = `${viewportHeight}px`;
+        }
     }
 }
 
 // ==============================================
-// INICIALIZACIÓN
+// INICIALIZACIÓN DE LA APLICACIÓN
 // ==============================================
 
-// Iniciar cuando el DOM esté listo
+// Polyfill para requestIdleCallback en navegadores que no lo soportan
+if (!window.requestIdleCallback) {
+    window.requestIdleCallback = function(callback) {
+        return setTimeout(() => {
+            callback({
+                didTimeout: false,
+                timeRemaining: function() {
+                    return 50;
+                }
+            });
+        }, 1);
+    };
+}
+
+if (!window.cancelIdleCallback) {
+    window.cancelIdleCallback = function(id) {
+        clearTimeout(id);
+    };
+}
+
+// Iniciar aplicación cuando el DOM esté listo
+let app;
+
 document.addEventListener('DOMContentLoaded', () => {
-    // Polyfill para requestIdleCallback
-    window.requestIdleCallback = window.requestIdleCallback || 
-        function(cb) { return setTimeout(cb, 1); };
-    
-    // Iniciar aplicación
-    window.app = new OptimizedProductSearch();
+    try {
+        app = new OptimizedProductSearch();
+        window.app = app; // Exponer para debugging
+    } catch (error) {
+        console.error('Error inicializando la aplicación:', error);
+        document.body.innerHTML = `
+            <div style="padding: 20px; text-align: center;">
+                <h2>⚠️ Error en la aplicación</h2>
+                <p>${error.message}</p>
+                <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 20px;">
+                    Recargar página
+                </button>
+            </div>
+        `;
+    }
 });
 
-// Service Worker para cache (opcional pero recomendado)
-if ('serviceWorker' in navigator) {
+// Service Worker para cache (opcional)
+if ('serviceWorker' in navigator && window.location.hostname !== 'localhost') {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(err => {
-            console.log('ServiceWorker registration failed: ', err);
+            console.log('ServiceWorker registration failed:', err);
         });
     });
 }
