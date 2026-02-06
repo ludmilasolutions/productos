@@ -3,21 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Ferretería Carnevale - Lista de Precios</title>
-    <meta name="theme-color" content="#2c3e50">
+    <title>Listado de Precios - Ferretería Carnevale</title>
+    <meta name="theme-color" content="#1a237e">
+    <meta name="description" content="Buscador de productos de ferretería. Consulta precios y contacta por WhatsApp.">
     <link rel="stylesheet" href="styles.css">
     <link rel="preload" href="app.js" as="script">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛠️</text></svg>">
+    <style>
+        /* Critical CSS inline for faster initial paint */
+        .critical-loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 9999;
+        }
+        .critical-loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
-    <!-- Solo elementos críticos visibles inicialmente -->
-    <div class="app-container" id="appContainer">
-        <header class="app-header" id="appHeader">
+    <!-- Critical loading state -->
+    <div class="critical-loading" id="criticalLoading">
+        <div class="spinner"></div>
+        <p>Cargando sistema...</p>
+    </div>
+
+    <!-- Main app (hidden initially) -->
+    <div class="app-container" id="appContainer" style="display: none;">
+        <header class="app-header">
             <div class="header-content">
                 <h1>🛠️ FERRETERÍA CARNEVALE</h1>
                 <p class="subtitle">Lista de precios - Buscador rápido</p>
                 <div class="stats">
-                    <span id="productCount">Cargando...</span>
+                    <span id="productCount">Cargando productos...</span>
                 </div>
             </div>
         </header>
@@ -27,62 +63,108 @@
                 <input 
                     type="search" 
                     id="searchInput" 
-                    placeholder="Buscar producto..." 
+                    placeholder="Ej: martillo 500g, rodillo 22cm..." 
                     autocapitalize="off"
                     autocomplete="off"
                     enterkeyhint="search"
+                    aria-label="Buscar productos"
                 >
                 <div class="search-actions">
-                    <button id="clearBtn" class="icon-btn" aria-label="Limpiar búsqueda">×</button>
+                    <button id="clearBtn" class="icon-btn" aria-label="Limpiar búsqueda" style="display: none;">×</button>
                 </div>
             </div>
             
             <div class="quick-filters">
-                <select id="rubroFilter" class="mobile-select">
+                <select id="rubroFilter" class="mobile-select" aria-label="Filtrar por rubro">
                     <option value="">Todos los rubros</option>
                 </select>
-                <select id="sortFilter" class="mobile-select">
-                    <option value="relevance">Relevancia</option>
-                    <option value="price_asc">Precio ↑</option>
-                    <option value="price_desc">Precio ↓</option>
+                <select id="sortFilter" class="mobile-select" aria-label="Ordenar resultados">
+                    <option value="relevance">Más relevantes</option>
+                    <option value="price_asc">Precio menor a mayor</option>
+                    <option value="price_desc">Precio mayor a menor</option>
                 </select>
+            </div>
+            
+            <div class="search-hints">
+                <small>💡 Busca por código, descripción o marca. Ej: "A123", "llave inglesa", "truper"</small>
             </div>
         </div>
 
-        <!-- Contenedor virtualizado -->
+        <!-- Results info -->
+        <div class="results-info" id="resultsInfo">
+            <div class="info-content">
+                <span id="resultsCount">-</span>
+                <span id="searchTime" style="display: none;"></span>
+            </div>
+        </div>
+
+        <!-- Products viewport -->
         <div class="products-viewport" id="productsViewport">
             <div class="products-container" id="productsContainer"></div>
-            <div class="scroll-spacer" id="scrollSpacer"></div>
+            <div class="scroll-loader" id="scrollLoader" style="display: none;">
+                <div class="mini-spinner"></div>
+                <span>Cargando más productos...</span>
+            </div>
         </div>
 
-        <!-- Loading states -->
-        <div class="loading-indicator" id="loadingIndicator">
-            <div class="spinner"></div>
-            <p>Cargando productos...</p>
+        <!-- Empty states -->
+        <div class="search-state empty-state" id="emptyState">
+            <div class="state-icon">🔍</div>
+            <h3>Busca productos</h3>
+            <p>Escribe lo que necesitas en el buscador de arriba</p>
+            <div class="state-tips">
+                <p><strong>Consejos:</strong></p>
+                <ul>
+                    <li>Puedes buscar por código, nombre o marca</li>
+                    <li>Ej: "rodillo 22", "martillo bola", "flexible 35"</li>
+                    <li>Usa filtros para refinar resultados</li>
+                </ul>
+            </div>
         </div>
 
-        <div class="empty-state" id="emptyState">
-            <p>Ingresa un término para buscar productos</p>
+        <div class="search-state no-results" id="noResults" style="display: none;">
+            <div class="state-icon">😕</div>
+            <h3>No encontramos productos</h3>
+            <p>Intenta con otras palabras o usa filtros diferentes</p>
+            <button id="resetSearch" class="text-btn">Limpiar búsqueda</button>
         </div>
 
-        <div class="no-results" id="noResults">
-            <p>No se encontraron productos</p>
-            <button id="resetSearch" class="text-btn">Mostrar todos</button>
+        <div class="search-state loading-state" id="loadingState" style="display: none;">
+            <div class="state-icon">
+                <div class="spinner"></div>
+            </div>
+            <h3>Cargando productos...</h3>
+            <p>Estamos preparando el listado de precios</p>
         </div>
 
-        <!-- Footer ligero -->
+        <!-- Footer -->
         <footer class="app-footer">
-            <p>Actualizado semanalmente • Consultas por WhatsApp</p>
+            <div class="footer-content">
+                <p><strong>Ferretería Carnevale</strong> • Lista actualizada semanalmente</p>
+                <p class="footer-note">💬 Para consultas y compras, usa el botón WhatsApp de cada producto</p>
+                <p class="footer-update" id="lastUpdate"></p>
+            </div>
         </footer>
     </div>
 
-    <!-- Modal optimizado -->
-    <dialog id="productModal">
-        <div class="modal-content">
-            <button id="closeModal" class="modal-close">×</button>
-            <div id="modalContent"></div>
+    <!-- Product Modal -->
+    <div class="modal-overlay" id="modalOverlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 id="modalTitle">Detalles del producto</h2>
+                <button class="modal-close" id="modalClose" aria-label="Cerrar">×</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Dynamic content -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-whatsapp-large" id="modalWhatsAppBtn">
+                    <span class="whatsapp-icon">💬</span>
+                    <span>Consultar por WhatsApp</span>
+                </button>
+            </div>
         </div>
-    </dialog>
+    </div>
 
     <script src="app.js" defer></script>
 </body>
