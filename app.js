@@ -1,400 +1,702 @@
-// Sistema de búsqueda para Ferretería Carnevale
-class ProductSearchSystem {
+// ==============================================
+// SISTEMA DE BÚSQUEDA OPTIMIZADO PARA MÓVIL
+// Ferretería Carnevale - Versión Ultra Lite
+// ==============================================
+
+class OptimizedProductSearch {
     constructor() {
-        this.products = [];
-        this.filteredProducts = [];
-        this.rubros = new Set();
-        this.currentSearch = '';
-        this.currentRubro = '';
-        this.currentSort = 'descripcion';
+        // Configuración de performance
+        this.CONFIG = {
+            BATCH_SIZE: 30,
+            DEBOUNCE_MS: 300,
+            LAZY_LOAD_THRESHOLD: 100,
+            MAX_RESULTS: 100,
+            CACHE_SIZE: 50
+        };
+
+        // Estado de la aplicación
+        this.state = {
+            products: [],
+            filtered: [],
+            visible: [],
+            rubros: new Set(),
+            searchIndex: new Map(),
+            loading: false,
+            searchTerm: '',
+            currentRubro: '',
+            sortBy: 'relevance',
+            offset: 0,
+            hasMore: false
+        };
+
+        // Cache de resultados
+        this.cache = new Map();
+        this.searchCache = new Map();
         
-        // Inicializar
+        // Referencias a DOM
+        this.refs = {};
+        
+        // Pool de nodos reutilizables
+        this.nodePool = {
+            cards: [],
+            currentIndex: 0
+        };
+
+        // Inicialización diferida
         this.init();
     }
-    
+
+    // ==============================================
+    // 1. INICIALIZACIÓN OPTIMIZADA
+    // ==============================================
+
     async init() {
-        // Cargar productos
-        await this.loadProducts();
-        
-        // Inicializar controles
-        this.initControls();
-        
-        // Renderizar productos iniciales
-        this.renderProducts();
-        
-        // Actualizar fecha
-        this.updateDates();
+        this.cacheDOM();
+        this.setupEventDelegation();
+        this.setupIntersectionObserver();
+        await this.loadData();
+        this.setupInitialState();
     }
-    
-    async loadProducts() {
+
+    cacheDOM() {
+        // Solo cachear elementos críticos
+        this.refs = {
+            searchInput: document.getElementById('searchInput'),
+            productsContainer: document.getElementById('productsContainer'),
+            productsViewport: document.getElementById('productsViewport'),
+            rubroFilter: document.getElementById('rubroFilter'),
+            sortFilter: document.getElementById('sortFilter'),
+            productCount: document.getElementById('productCount'),
+            loadingIndicator: document.getElementById('loadingIndicator'),
+            emptyState: document.getElementById('emptyState'),
+            noResults: document.getElementById('noResults'),
+            clearBtn: document.getElementById('clearBtn'),
+            resetSearch: document.getElementById('resetSearch'),
+            modal: document.getElementById('productModal'),
+            closeModal: document.getElementById('closeModal')
+        };
+    }
+
+    setupEventDelegation() {
+        // Un solo listener para todos los eventos
+        document.addEventListener('input', this.debounce(this.handleSearch.bind(this), this.CONFIG.DEBOUNCE_MS));
+        document.addEventListener('change', this.handleFilterChange.bind(this));
+        document.addEventListener('click', this.handleClick.bind(this));
+        
+        // Eventos táctiles optimizados
+        this.refs.productsViewport.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
+        
+        // Eventos del modal
+        this.refs.closeModal?.addEventListener('click', () => this.refs.modal.close());
+        this.refs.modal?.addEventListener('click', (e) => {
+            if (e.target === this.refs.modal) this.refs.modal.close();
+        });
+    }
+
+    setupIntersectionObserver() {
+        // Observer para lazy loading de productos
+        this.observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && this.state.hasMore) {
+                        this.loadMoreProducts();
+                    }
+                });
+            },
+            { root: this.refs.productsViewport, threshold: 0.1 }
+        );
+    }
+
+    // ==============================================
+    // 2. CARGA DE DATOS EFICIENTE
+    // ==============================================
+
+    async loadData() {
+        this.showLoading();
+        
         try {
-            // Mostrar spinner de carga
-            document.getElementById('productCount').textContent = 'Cargando productos...';
+            // Stream de datos con fetch optimizado
+            const response = await fetch('products.json', {
+                priority: 'high',
+                cache: 'force-cache'
+            });
+
+            if (!response.ok) throw new Error('Error cargando datos');
+
+            // Parseo incremental
+            const data = await response.json();
             
-            // Cargar el archivo JSON
-            const response = await fetch('products.json');
+            // Procesamiento en lotes para no bloquear UI
+            await this.processDataInBatches(data);
             
-            if (!response.ok) {
-                throw new Error(`Error al cargar productos: ${response.status}`);
-            }
-            
-            this.products = await response.json();
-            
-            // Extraer rubros únicos
-            this.extractRubros();
-            
-            // Productos iniciales son todos los productos
-            this.filteredProducts = [...this.products];
-            
-            // Actualizar contador
-            this.updateProductCount();
+            this.hideLoading();
+            this.showEmptyState();
             
         } catch (error) {
-            console.error('Error cargando productos:', error);
-            document.getElementById('productCount').textContent = 'Error cargando productos';
-            document.getElementById('productsContainer').innerHTML = `
-                <div class="no-results" style="display: block;">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <h3>Error al cargar los productos</h3>
-                    <p>Por favor, verifica que el archivo products.json esté en la carpeta correcta</p>
-                </div>
-            `;
+            console.error('Error loading products:', error);
+            this.showError();
         }
     }
-    
-    extractRubros() {
-        this.rubros.clear();
+
+    async processDataInBatches(data) {
+        const batchSize = 1000;
+        const totalBatches = Math.ceil(data.length / batchSize);
         
-        // Agregar rubros únicos
-        this.products.forEach(product => {
-            if (product.rubro && product.rubro.trim() !== '') {
-                this.rubros.add(product.rubro.trim());
-            }
-        });
-        
-        // Ordenar rubros alfabéticamente
-        const rubrosArray = Array.from(this.rubros).sort();
-        
-        // Actualizar selector de rubros
-        const rubroFilter = document.getElementById('rubroFilter');
-        rubroFilter.innerHTML = '<option value="">Todos los rubros</option>';
-        
-        rubrosArray.forEach(rubro => {
-            const option = document.createElement('option');
-            option.value = rubro;
-            option.textContent = rubro;
-            rubroFilter.appendChild(option);
-        });
-    }
-    
-    initControls() {
-        // Buscador
-        const searchInput = document.getElementById('searchInput');
-        const clearSearch = document.getElementById('clearSearch');
-        const rubroFilter = document.getElementById('rubroFilter');
-        const sortFilter = document.getElementById('sortFilter');
-        const scrollTopBtn = document.getElementById('scrollTopBtn');
-        const closeModal = document.getElementById('closeModal');
-        const modal = document.getElementById('productModal');
-        
-        // Evento de búsqueda
-        searchInput.addEventListener('input', (e) => {
-            this.currentSearch = e.target.value.toLowerCase().trim();
-            this.filterProducts();
-            this.renderProducts();
-        });
-        
-        // Limpiar búsqueda
-        clearSearch.addEventListener('click', () => {
-            searchInput.value = '';
-            this.currentSearch = '';
-            this.filterProducts();
-            this.renderProducts();
-            searchInput.focus();
-        });
-        
-        // Filtro por rubro
-        rubroFilter.addEventListener('change', (e) => {
-            this.currentRubro = e.target.value;
-            this.filterProducts();
-            this.renderProducts();
-        });
-        
-        // Ordenar productos
-        sortFilter.addEventListener('change', (e) => {
-            this.currentSort = e.target.value;
-            this.sortProducts();
-            this.renderProducts();
-        });
-        
-        // Botón para subir
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 300) {
-                scrollTopBtn.classList.add('visible');
-            } else {
-                scrollTopBtn.classList.remove('visible');
-            }
-        });
-        
-        scrollTopBtn.addEventListener('click', () => {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-        
-        // Cerrar modal
-        closeModal.addEventListener('click', () => {
-            modal.classList.remove('active');
-        });
-        
-        // Cerrar modal al hacer clic fuera
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('active');
-            }
-        });
-        
-        // Cerrar modal con ESC
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modal.classList.contains('active')) {
-                modal.classList.remove('active');
-            }
-        });
-    }
-    
-    filterProducts() {
-        // Filtrar por búsqueda
-        let filtered = this.products;
-        
-        if (this.currentSearch) {
-            filtered = filtered.filter(product => {
-                const searchLower = this.currentSearch.toLowerCase();
-                return (
-                    (product.descripcion && product.descripcion.toLowerCase().includes(searchLower)) ||
-                    (product.codigo && product.codigo.toLowerCase().includes(searchLower)) ||
-                    (product.marca && product.marca.toLowerCase().includes(searchLower))
-                );
-            });
+        for (let i = 0; i < totalBatches; i++) {
+            const start = i * batchSize;
+            const end = start + batchSize;
+            const batch = data.slice(start, end);
+            
+            // Procesar batch sin bloquear
+            await this.processBatch(batch);
+            
+            // Liberar control al event loop
+            if (i % 5 === 0) await this.yieldToMainThread();
         }
         
-        // Filtrar por rubro
-        if (this.currentRubro) {
-            filtered = filtered.filter(product => 
-                product.rubro && product.rubro === this.currentRubro
-            );
-        }
-        
-        this.filteredProducts = filtered;
-        this.sortProducts();
+        // Construir índice después de procesar todo
+        this.buildSearchIndex();
+        this.updateRubroFilter();
         this.updateProductCount();
     }
-    
-    sortProducts() {
-        switch (this.currentSort) {
-            case 'descripcion':
-                this.filteredProducts.sort((a, b) => 
-                    (a.descripcion || '').localeCompare(b.descripcion || '')
-                );
-                break;
-                
-            case 'precio_asc':
-                this.filteredProducts.sort((a, b) => 
-                    (a.precio_venta || 0) - (b.precio_venta || 0)
-                );
-                break;
-                
-            case 'precio_desc':
-                this.filteredProducts.sort((a, b) => 
-                    (b.precio_venta || 0) - (a.precio_venta || 0)
-                );
-                break;
-                
-            case 'codigo':
-                this.filteredProducts.sort((a, b) => 
-                    (a.codigo || '').localeCompare(b.codigo || '')
-                );
-                break;
-        }
+
+    async processBatch(batch) {
+        return new Promise(resolve => {
+            requestIdleCallback(() => {
+                batch.forEach(product => {
+                    // Normalización y almacenamiento eficiente
+                    const normalized = this.normalizeProduct(product);
+                    this.state.products.push(normalized);
+                    
+                    // Indexar para búsqueda rápida
+                    this.indexProduct(normalized);
+                    
+                    // Agrupar rubros
+                    if (normalized.rubro) {
+                        this.state.rubros.add(normalized.rubro);
+                    }
+                });
+                resolve();
+            });
+        });
     }
-    
-    updateProductCount() {
-        const count = this.filteredProducts.length;
-        const total = this.products.length;
-        const countElement = document.getElementById('productCount');
+
+    yieldToMainThread() {
+        return new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    // ==============================================
+    // 3. INDEXACIÓN Y BÚSQUEDA ÓPTIMA
+    // ==============================================
+
+    buildSearchIndex() {
+        // Índice invertido para búsqueda O(1)
+        this.state.searchIndex.clear();
         
-        countElement.innerHTML = `
-            <span class="count">${count}</span> productos
-            ${this.currentSearch || this.currentRubro ? 
-                `<span class="filter-info"> (filtrados de ${total})</span>` : 
-                ''
+        this.state.products.forEach((product, index) => {
+            // Indexar por tokens
+            const tokens = this.getSearchTokens(product);
+            tokens.forEach(token => {
+                if (!this.state.searchIndex.has(token)) {
+                    this.state.searchIndex.set(token, new Set());
+                }
+                this.state.searchIndex.get(token).add(index);
+            });
+        });
+    }
+
+    getSearchTokens(product) {
+        const tokens = new Set();
+        
+        // Normalizar y tokenizar cada campo
+        const fields = [
+            product.descripcion,
+            product.codigo,
+            product.marca,
+            product.rubro
+        ];
+        
+        fields.forEach(field => {
+            if (field) {
+                const normalized = this.normalizeString(field);
+                const words = normalized.split(/\s+/);
+                words.forEach(word => {
+                    if (word.length >= 2) {
+                        tokens.add(word);
+                        // También agregar prefijos para búsqueda incremental
+                        for (let i = 2; i <= word.length; i++) {
+                            tokens.add(word.substring(0, i));
+                        }
+                    }
+                });
             }
-        `;
+        });
         
-        // Mostrar/ocultar mensaje sin resultados
-        const noResults = document.getElementById('noResults');
-        const productsContainer = document.getElementById('productsContainer');
-        
-        if (count === 0 && this.products.length > 0) {
-            noResults.style.display = 'block';
-            productsContainer.style.display = 'none';
-        } else {
-            noResults.style.display = 'none';
-            productsContainer.style.display = 'grid';
-        }
+        return Array.from(tokens);
     }
-    
-    renderProducts() {
-        const container = document.getElementById('productsContainer');
+
+    normalizeProduct(product) {
+        return {
+            codigo: String(product.codigo || '').trim(),
+            descripcion: String(product.descripcion || '').trim(),
+            rubro: String(product.rubro || '').trim(),
+            marca: String(product.marca || '').trim(),
+            precio_venta: Number(product.precio_venta) || 0,
+            searchable: this.normalizeString(
+                `${product.descripcion} ${product.codigo} ${product.marca} ${product.rubro}`
+            )
+        };
+    }
+
+    normalizeString(str) {
+        return str
+            .toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove accents
+            .replace(/[^a-z0-9\s]/g, ' ') // Keep only alphanumeric
+            .replace(/\s+/g, ' ') // Normalize spaces
+            .trim();
+    }
+
+    // ==============================================
+    // 4. BÚSQUEDA CON DEBOUNCE Y CACHE
+    // ==============================================
+
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    async handleSearch(e) {
+        if (e.target !== this.refs.searchInput) return;
         
-        if (this.filteredProducts.length === 0 && this.products.length > 0) {
-            container.innerHTML = '';
+        const searchTerm = e.target.value.trim();
+        this.state.searchTerm = searchTerm;
+        
+        // Limpiar si está vacío
+        if (!searchTerm) {
+            this.refs.clearBtn.style.display = 'none';
+            this.showEmptyState();
             return;
         }
         
-        if (this.filteredProducts.length === 0) {
-            // Mostrar spinner mientras carga
-            container.innerHTML = `
-                <div class="loading-spinner">
-                    <div class="spinner"></div>
-                    <p>Cargando listado de precios...</p>
-                </div>
-            `;
+        this.refs.clearBtn.style.display = 'block';
+        
+        // Verificar cache primero
+        const cacheKey = `${searchTerm}-${this.state.currentRubro}-${this.state.sortBy}`;
+        
+        if (this.searchCache.has(cacheKey)) {
+            this.state.filtered = this.searchCache.get(cacheKey);
+            this.renderResults();
             return;
         }
         
-        // Generar HTML de productos
-        const productsHTML = this.filteredProducts.map(product => this.createProductCard(product)).join('');
-        container.innerHTML = productsHTML;
-        
-        // Agregar event listeners a las tarjetas
-        this.addProductCardListeners();
+        // Búsqueda optimizada con índice
+        this.performSearch(searchTerm);
     }
-    
-    createProductCard(product) {
-        const precioFormateado = this.formatPrice(product.precio_venta);
+
+    performSearch(searchTerm) {
+        const normalizedSearch = this.normalizeString(searchTerm);
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2);
         
-        return `
-            <div class="product-card" data-id="${product.codigo}">
-                <div class="product-header">
-                    <div class="product-code">
-                        <i class="fas fa-barcode"></i> ${product.codigo}
-                    </div>
-                    <div class="product-desc" title="${product.descripcion}">
-                        ${product.descripcion}
-                    </div>
-                    ${product.marca ? `
-                        <div class="product-brand">
-                            <i class="fas fa-tag"></i> ${product.marca}
-                        </div>
-                    ` : ''}
+        if (searchWords.length === 0) {
+            this.state.filtered = [];
+            this.renderResults();
+            return;
+        }
+        
+        // Buscar en índice
+        let resultIndices = new Set();
+        
+        searchWords.forEach((word, index) => {
+            const wordResults = this.state.searchIndex.get(word) || new Set();
+            
+            if (index === 0) {
+                resultIndices = new Set(wordResults);
+            } else {
+                // Intersección para AND search
+                resultIndices = new Set(
+                    [...resultIndices].filter(x => wordResults.has(x))
+                );
+            }
+        });
+        
+        // Convertir índices a productos
+        this.state.filtered = Array.from(resultIndices)
+            .map(idx => this.state.products[idx])
+            .filter(product => {
+                // Filtrar por rubro si está seleccionado
+                if (this.state.currentRubro && product.rubro !== this.state.currentRubro) {
+                    return false;
+                }
+                return product.precio_venta > 0;
+            });
+        
+        // Ordenar resultados
+        this.sortResults();
+        
+        // Cachear resultados
+        if (this.searchCache.size >= this.CONFIG.CACHE_SIZE) {
+            const firstKey = this.searchCache.keys().next().value;
+            this.searchCache.delete(firstKey);
+        }
+        this.searchCache.set(cacheKey, this.state.filtered);
+        
+        // Renderizar
+        this.renderResults();
+    }
+
+    // ==============================================
+    // 5. RENDERIZADO VIRTUALIZADO
+    // ==============================================
+
+    renderResults() {
+        // Resetear offset
+        this.state.offset = 0;
+        this.state.hasMore = this.state.filtered.length > this.CONFIG.BATCH_SIZE;
+        
+        // Limpiar container eficientemente
+        this.clearContainer();
+        
+        if (this.state.filtered.length === 0) {
+            this.showNoResults();
+            return;
+        }
+        
+        // Renderizar primer lote
+        this.renderNextBatch();
+        
+        // Actualizar contador
+        this.updateProductCount();
+    }
+
+    clearContainer() {
+        // Reutilizar nodos en lugar de recrearlos
+        const container = this.refs.productsContainer;
+        
+        // Mover nodos al pool
+        while (container.firstChild) {
+            const node = container.firstChild;
+            container.removeChild(node);
+            this.nodePool.cards.push(node);
+        }
+        
+        // Resetear pool index
+        this.nodePool.currentIndex = 0;
+    }
+
+    renderNextBatch() {
+        const start = this.state.offset;
+        const end = Math.min(start + this.CONFIG.BATCH_SIZE, this.state.filtered.length);
+        const batch = this.state.filtered.slice(start, end);
+        
+        // Usar DocumentFragment para batch update
+        const fragment = document.createDocumentFragment();
+        
+        batch.forEach(product => {
+            const node = this.getProductNode(product);
+            fragment.appendChild(node);
+        });
+        
+        this.refs.productsContainer.appendChild(fragment);
+        
+        // Actualizar estado
+        this.state.offset = end;
+        this.state.hasMore = end < this.state.filtered.length;
+        
+        // Observar último elemento para infinite scroll
+        if (this.state.hasMore) {
+            const lastChild = this.refs.productsContainer.lastChild;
+            this.observer.observe(lastChild);
+        }
+    }
+
+    getProductNode(product) {
+        // Reutilizar nodo del pool si está disponible
+        if (this.nodePool.currentIndex < this.nodePool.cards.length) {
+            const node = this.nodePool.cards[this.nodePool.currentIndex];
+            this.updateProductNode(node, product);
+            this.nodePool.currentIndex++;
+            return node;
+        }
+        
+        // Crear nuevo nodo
+        const node = document.createElement('div');
+        node.className = 'product-card';
+        node.dataset.id = product.codigo;
+        
+        this.updateProductNode(node, product);
+        return node;
+    }
+
+    updateProductNode(node, product) {
+        // Actualizar solo lo necesario
+        node.innerHTML = `
+            <div class="product-image">🛠️</div>
+            <div class="product-info">
+                <div class="product-code">${product.codigo}</div>
+                <div class="product-desc">${product.descripcion}</div>
+                <div class="product-meta">
+                    ${product.marca ? `<span class="product-brand">${product.marca}</span>` : ''}
+                    <span class="product-price">${this.formatPrice(product.precio_venta)}</span>
                 </div>
-                <div class="product-body">
-                    ${product.rubro ? `
-                        <div class="product-rubro">
-                            <i class="fas fa-folder"></i> ${product.rubro}
-                        </div>
-                    ` : ''}
-                    <div class="product-price">${precioFormateado}</div>
-                    <button class="whatsapp-btn" onclick="productSystem.openWhatsApp(event, ${JSON.stringify(product).replace(/"/g, '&quot;')})">
-                        <i class="fab fa-whatsapp"></i> Consultar por WhatsApp
+                <div class="product-actions">
+                    <button class="btn btn-whatsapp" data-action="whatsapp" data-product='${JSON.stringify(product)}'>
+                        WhatsApp
+                    </button>
+                    <button class="btn btn-details" data-action="details" data-product='${JSON.stringify(product)}'>
+                        Detalles
                     </button>
                 </div>
             </div>
         `;
     }
-    
-    addProductCardListeners() {
-        const productCards = document.querySelectorAll('.product-card');
+
+    // ==============================================
+    // 6. MANEJO DE EVENTOS OPTIMIZADO
+    // ==============================================
+
+    handleFilterChange(e) {
+        if (e.target === this.refs.rubroFilter) {
+            this.state.currentRubro = e.target.value;
+        } else if (e.target === this.refs.sortFilter) {
+            this.state.sortBy = e.target.value;
+        }
         
-        productCards.forEach(card => {
-            card.addEventListener('click', (e) => {
-                // Evitar abrir modal si se hizo clic en el botón de WhatsApp
-                if (e.target.closest('.whatsapp-btn')) {
-                    return;
-                }
-                
-                const codigo = card.getAttribute('data-id');
-                const product = this.filteredProducts.find(p => p.codigo === codigo);
-                
-                if (product) {
-                    this.openProductModal(product);
-                }
-            });
+        // Re-buscar con nuevos filtros
+        if (this.state.searchTerm) {
+            this.performSearch(this.state.searchTerm);
+        }
+    }
+
+    handleClick(e) {
+        const target = e.target;
+        
+        // Delegación de eventos para botones
+        if (target.matches('[data-action]')) {
+            const action = target.dataset.action;
+            const product = JSON.parse(target.dataset.product);
+            
+            if (action === 'whatsapp') {
+                this.openWhatsApp(product);
+            } else if (action === 'details') {
+                this.openProductModal(product);
+            }
+        }
+        
+        // Botón clear
+        if (target === this.refs.clearBtn) {
+            this.refs.searchInput.value = '';
+            this.refs.clearBtn.style.display = 'none';
+            this.state.searchTerm = '';
+            this.showEmptyState();
+        }
+        
+        // Botón reset search
+        if (target === this.refs.resetSearch) {
+            this.refs.searchInput.value = '';
+            this.state.searchTerm = '';
+            this.state.filtered = [];
+            this.showEmptyState();
+        }
+    }
+
+    handleScroll() {
+        // Virtual scrolling simple
+        requestAnimationFrame(() => {
+            const scrollTop = this.refs.productsViewport.scrollTop;
+            const scrollHeight = this.refs.productsViewport.scrollHeight;
+            const clientHeight = this.refs.productsViewport.clientHeight;
+            
+            if (scrollHeight - scrollTop - clientHeight < 100 && this.state.hasMore) {
+                this.loadMoreProducts();
+            }
         });
     }
-    
-    openProductModal(product) {
-        const modal = document.getElementById('productModal');
-        const precioFormateado = this.formatPrice(product.precio_venta);
+
+    // ==============================================
+    // 7. FUNCIONALIDADES AUXILIARES
+    // ==============================================
+
+    loadMoreProducts() {
+        if (this.state.loading || !this.state.hasMore) return;
         
-        // Actualizar contenido del modal
-        document.getElementById('modalCodigo').textContent = product.codigo;
-        document.getElementById('modalDescripcion').textContent = product.descripcion;
-        document.getElementById('modalMarca').textContent = product.marca || 'No especificada';
-        document.getElementById('modalRubro').textContent = product.rubro || 'No especificado';
-        document.getElementById('modalPrecio').textContent = precioFormateado;
-        
-        // Actualizar botón de WhatsApp en el modal
-        const modalWhatsAppBtn = document.getElementById('modalWhatsAppBtn');
-        modalWhatsAppBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.openWhatsApp(e, product);
-            modal.classList.remove('active');
-        };
-        
-        // Mostrar modal
-        modal.classList.add('active');
+        this.state.loading = true;
+        requestAnimationFrame(() => {
+            this.renderNextBatch();
+            this.state.loading = false;
+        });
     }
-    
-    openWhatsApp(event, product) {
-        event.stopPropagation();
+
+    sortResults() {
+        const { filtered, sortBy } = this.state;
         
+        filtered.sort((a, b) => {
+            switch (sortBy) {
+                case 'price_asc':
+                    return a.precio_venta - b.precio_venta;
+                case 'price_desc':
+                    return b.precio_venta - a.precio_venta;
+                case 'relevance':
+                default:
+                    // Mantener orden de relevancia (ya está ordenado por la búsqueda)
+                    return 0;
+            }
+        });
+    }
+
+    openWhatsApp(product) {
         const message = `Hola, quiero consultar por:
 ${product.descripcion}
 Código: ${product.codigo}
 Precio: $${this.formatPrice(product.precio_venta)}`;
         
-        const encodedMessage = encodeURIComponent(message);
-        const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
-        
-        // Abrir WhatsApp en nueva pestaña
-        window.open(whatsappUrl, '_blank');
+        const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+        window.open(url, '_blank');
     }
-    
+
+    openProductModal(product) {
+        const content = `
+            <h3>${product.descripcion}</h3>
+            <p><strong>Código:</strong> ${product.codigo}</p>
+            ${product.marca ? `<p><strong>Marca:</strong> ${product.marca}</p>` : ''}
+            ${product.rubro ? `<p><strong>Rubro:</strong> ${product.rubro}</p>` : ''}
+            <p class="modal-price"><strong>Precio:</strong> $${this.formatPrice(product.precio_venta)}</p>
+            <button class="btn btn-whatsapp" onclick="app.openWhatsApp(${JSON.stringify(product)})">
+                Consultar por WhatsApp
+            </button>
+        `;
+        
+        this.refs.modalContent.innerHTML = content;
+        this.refs.modal.showModal();
+    }
+
     formatPrice(price) {
-        if (typeof price !== 'number') {
-            price = parseFloat(price) || 0;
+        return new Intl.NumberFormat('es-AR').format(price);
+    }
+
+    updateProductCount() {
+        const total = this.state.products.length;
+        const showing = this.state.filtered.length || total;
+        
+        this.refs.productCount.textContent = 
+            this.state.searchTerm || this.state.currentRubro
+                ? `${showing} de ${total} productos`
+                : `${total} productos disponibles`;
+    }
+
+    updateRubroFilter() {
+        const rubros = Array.from(this.state.rubros).sort();
+        const select = this.refs.rubroFilter;
+        
+        // Limpiar opciones existentes (excepto la primera)
+        while (select.options.length > 1) {
+            select.remove(1);
         }
         
-        // Formato argentino con separador de miles
-        return price.toLocaleString('es-AR', {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0
+        // Agregar opciones
+        rubros.forEach(rubro => {
+            const option = document.createElement('option');
+            option.value = rubro;
+            option.textContent = rubro;
+            select.appendChild(option);
         });
     }
-    
-    updateDates() {
-        const today = new Date();
-        const options = { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-        };
+
+    // ==============================================
+    // 8. ESTADOS DE UI OPTIMIZADOS
+    // ==============================================
+
+    showLoading() {
+        this.refs.loadingIndicator?.classList.add('active');
+        this.refs.emptyState?.classList.remove('active');
+        this.refs.noResults?.classList.remove('active');
+        this.refs.productsContainer.style.display = 'none';
+    }
+
+    hideLoading() {
+        this.refs.loadingIndicator?.classList.remove('active');
+    }
+
+    showEmptyState() {
+        this.refs.emptyState?.classList.add('active');
+        this.refs.noResults?.classList.remove('active');
+        this.refs.productsContainer.style.display = 'none';
+        this.state.filtered = [];
+        this.clearContainer();
+        this.updateProductCount();
+    }
+
+    showNoResults() {
+        this.refs.noResults?.classList.add('active');
+        this.refs.emptyState?.classList.remove('active');
+        this.refs.productsContainer.style.display = 'none';
+    }
+
+    showError() {
+        this.refs.productCount.textContent = 'Error cargando productos';
+        this.refs.loadingIndicator.classList.remove('active');
+    }
+
+    setupInitialState() {
+        // Pre-cache de nodos
+        this.prefillNodePool();
         
-        const dateString = today.toLocaleDateString('es-AR', options);
-        const timeString = today.toLocaleTimeString('es-AR', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        });
+        // Establecer altura del viewport
+        this.setViewportHeight();
         
-        // Actualizar fecha en el header
-        document.getElementById('updateDate').textContent = `Actualizado: ${dateString}`;
+        // Cargar primeros productos si no hay búsqueda
+        if (!this.state.searchTerm) {
+            this.state.filtered = this.state.products.slice(0, this.CONFIG.BATCH_SIZE);
+            this.state.hasMore = this.state.products.length > this.CONFIG.BATCH_SIZE;
+            this.renderResults();
+        }
+    }
+
+    prefillNodePool() {
+        // Crear algunos nodos por adelantado
+        for (let i = 0; i < 10; i++) {
+            const node = document.createElement('div');
+            node.className = 'product-card';
+            this.nodePool.cards.push(node);
+        }
+    }
+
+    setViewportHeight() {
+        // Ajustar altura para mobile
+        const vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
         
-        // Actualizar fecha en el footer
-        document.getElementById('footerDate').textContent = `${dateString} ${timeString}`;
+        this.refs.productsViewport.style.height = 
+            `calc(var(--vh, 1vh) * 100 - ${this.refs.appHeader?.offsetHeight + this.refs.searchSection?.offsetHeight}px)`;
     }
 }
 
-// Inicializar el sistema cuando el DOM esté listo
+// ==============================================
+// INICIALIZACIÓN
+// ==============================================
+
+// Iniciar cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', () => {
-    window.productSystem = new ProductSearchSystem();
+    // Polyfill para requestIdleCallback
+    window.requestIdleCallback = window.requestIdleCallback || 
+        function(cb) { return setTimeout(cb, 1); };
+    
+    // Iniciar aplicación
+    window.app = new OptimizedProductSearch();
 });
+
+// Service Worker para cache (opcional pero recomendado)
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.log('ServiceWorker registration failed: ', err);
+        });
+    });
+}
