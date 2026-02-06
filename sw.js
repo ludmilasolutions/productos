@@ -1,19 +1,38 @@
 // Service Worker para cache de assets
-const CACHE_NAME = 'ferreteria-v1';
+const CACHE_NAME = 'ferreteria-cache-v1.2';
 const ASSETS_TO_CACHE = [
-    './',
-    './index.html',
-    './styles.css',
-    './app.js',
-    './products.json'
+    '/',
+    '/index.html',
+    '/styles.css',
+    '/app.js',
+    '/products.json'
 ];
 
-// Instalación y cache de recursos
+// Instalar y cachear assets
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then(cache => cache.addAll(ASSETS_TO_CACHE))
+            .then(cache => {
+                console.log('Cacheando assets críticos');
+                return cache.addAll(ASSETS_TO_CACHE);
+            })
             .then(() => self.skipWaiting())
+    );
+});
+
+// Activar y limpiar caches antiguos
+self.addEventListener('activate', event => {
+    event.waitUntil(
+        caches.keys().then(cacheNames => {
+            return Promise.all(
+                cacheNames.map(cacheName => {
+                    if (cacheName !== CACHE_NAME) {
+                        console.log('Eliminando cache antiguo:', cacheName);
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+        }).then(() => self.clients.claim())
     );
 });
 
@@ -22,48 +41,57 @@ self.addEventListener('fetch', event => {
     // Solo cachear GET requests
     if (event.request.method !== 'GET') return;
     
+    // Evitar cachear requests de analytics
+    if (event.request.url.includes('analytics')) return;
+    
     event.respondWith(
         caches.match(event.request)
-            .then(response => {
-                // Retornar desde cache si existe
-                if (response) {
-                    return response;
+            .then(cachedResponse => {
+                // Si existe en cache, devolverlo
+                if (cachedResponse) {
+                    return cachedResponse;
                 }
                 
-                // Clonar request
-                const fetchRequest = event.request.clone();
-                
-                return fetch(fetchRequest).then(response => {
-                    // Verificar respuesta válida
-                    if (!response || response.status !== 200 || response.type !== 'basic') {
+                // Si no, hacer fetch a la red
+                return fetch(event.request.clone())
+                    .then(response => {
+                        // Verificar respuesta válida
+                        if (!response || response.status !== 200 || response.type !== 'basic') {
+                            return response;
+                        }
+                        
+                        // Clonar para cachear
+                        const responseToCache = response.clone();
+                        
+                        // Agregar al cache
+                        caches.open(CACHE_NAME)
+                            .then(cache => {
+                                cache.put(event.request, responseToCache);
+                            });
+                        
                         return response;
-                    }
-                    
-                    // Clonar respuesta
-                    const responseToCache = response.clone();
-                    
-                    // Agregar al cache
-                    caches.open(CACHE_NAME).then(cache => {
-                        cache.put(event.request, responseToCache);
+                    })
+                    .catch(() => {
+                        // Fallback para products.json
+                        if (event.request.url.includes('products.json')) {
+                            return new Response(JSON.stringify([]), {
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+                        }
+                        
+                        // Fallback para otros assets
+                        if (event.request.url.endsWith('.css')) {
+                            return new Response('', {
+                                headers: { 'Content-Type': 'text/css' }
+                            });
+                        }
+                        
+                        if (event.request.url.endsWith('.js')) {
+                            return new Response('', {
+                                headers: { 'Content-Type': 'application/javascript' }
+                            });
+                        }
                     });
-                    
-                    return response;
-                });
             })
-    );
-});
-
-// Limpiar caches antiguos
-self.addEventListener('activate', event => {
-    event.waitUntil(
-        caches.keys().then(cacheNames => {
-            return Promise.all(
-                cacheNames.map(cacheName => {
-                    if (cacheName !== CACHE_NAME) {
-                        return caches.delete(cacheName);
-                    }
-                })
-            );
-        }).then(() => self.clients.claim())
     );
 });
